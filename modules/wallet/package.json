@@ -30,7 +30,7 @@
     "react": "^16.6.3",
     "react-copy-to-clipboard": "^5.0.1",
     "react-dom": "^16.6.3",
-    "react-scripts": "2.1.1",
+    "react-scripts": "^2.1.5",
     "react-select": "^2.2.0",
     "react-swipeable-views": "^0.13.0",
     "redux": "^4.0.1",
