@@ -1,9 +1,9 @@
-import { WithdrawalParameters, ChannelManagerChannelDetails, Sync, ThreadState, addSigToThreadState, ThreadStateUpdate } from './types'
+import { WithdrawalParameters, ChannelManagerChannelDetails, Sync, ThreadState, addSigToThreadState, ThreadStateUpdate, channelUpdateToUpdateRequest, ThreadHistoryItem, HubConfig, SyncResult } from './types'
 import { DepositArgs, SignedDepositRequestProposal, Omit } from './types'
+import * as actions from './state/actions'
 import { PurchaseRequest } from './types'
 import { UpdateRequest } from './types'
 import { createStore, Action, applyMiddleware } from 'redux'
-require('dotenv').config()
 import { EventEmitter } from 'events'
 import Web3 = require('web3')
 // local imports
@@ -24,7 +24,6 @@ import {
   ChannelStateUpdate,
   Payment,
   addSigToChannelState,
-  SyncResult,
   ChannelRow,
   ThreadRow,
   UnsignedThreadState,
@@ -37,15 +36,15 @@ import { ConnextStore, ConnextState, PersistentState } from "./state/store";
 import { handleStateFlags } from './state/middleware'
 import { reducers } from "./state/reducers";
 import { isFunction, ResolveablePromise, timeoutPromise } from "./lib/utils";
-import { toBN, mul } from './helpers/bn'
+import { toBN } from './helpers/bn'
 import { ExchangeController } from './controllers/ExchangeController'
 import { ExchangeRates } from './state/ConnextState/ExchangeRates'
 import CollateralController from "./controllers/CollateralController";
-import * as actions from './state/actions';
 import { AbstractController } from './controllers/AbstractController'
 import { EventLog } from 'web3/types';
-import { getChannel } from './lib/getChannel';
 import ThreadsController from './controllers/ThreadsController';
+import { getLastThreadUpdateId } from './lib/getLastThreadUpdateId';
+import { RedeemController } from './controllers/RedeemController';
 
 type Address = string
 // anytime the hub is sending us something to sign we need a verify method that verifies that the hub isn't being a jerk
@@ -64,8 +63,9 @@ export interface ContractOptions {
 export interface ConnextOptions {
   web3: Web3
   hubUrl: string
-  contractAddress: string
-  hubAddress: Address
+  ethNetworkId?: string
+  contractAddress?: string
+  hubAddress?: Address
   hub?: IHubAPIClient
   tokenAddress?: Address
   tokenName?: string
@@ -74,8 +74,11 @@ export interface ConnextOptions {
 export interface IHubAPIClient {
   getChannel(): Promise<ChannelRow>
   getChannelStateAtNonce(txCountGlobal: number): Promise<ChannelStateUpdate>
-  getThreadInitialStates(): Promise<UnsignedThreadState[]>
+  getThreadInitialStates(): Promise<ThreadState[]>
   getIncomingThreads(): Promise<ThreadRow[]>
+  getActiveThreads(): Promise<ThreadState[]>
+  getLastThreadUpdateId(): Promise<number>
+  getAllThreads(): Promise<ThreadState[]>
   getThreadByParties(partyB: Address, userIsSender: boolean): Promise<ThreadRow>
   sync(txCountGlobal: number, lastThreadUpdateId: number): Promise<Sync | null>
   getExchangerRates(): Promise<ExchangeRates> // TODO: name is typo
@@ -92,29 +95,73 @@ export interface IHubAPIClient {
     updates: Sync
   }>
   updateThread(update: ThreadStateUpdate): Promise<ThreadStateUpdate>
-  getLatestChannelState(): Promise<ChannelState | null>
+  getLatestChannelStateAndUpdate(): Promise<{state: ChannelState, update: UpdateRequest} | null>
+  getLatestStateNoPendingOps(): Promise<ChannelState | null>
+  config(): Promise<HubConfig>
+  redeem(secret: string, txCount: number, lastThreadUpdateId: number,): Promise<PurchasePaymentHubResponse & { amount: Payment }>
 }
 
 class HubAPIClient implements IHubAPIClient {
   private user: Address
   private networking: Networking
-  private tokenName?: string
 
   constructor(user: Address, networking: Networking, tokenName?: string) {
     this.user = user
     this.networking = networking
-    this.tokenName = tokenName
   }
 
-  async getLatestChannelState(): Promise<ChannelState | null> {
+  async config(): Promise<HubConfig> {
+    const res = await this.networking.get(`config`)
+    return res.data
+  }
+
+  async getLatestStateNoPendingOps(): Promise<ChannelState | null> {
     try {
-      const res = await this.networking.get(`channel/${this.user}/latest-update`)
+      const res = await this.networking.get(`channel/${this.user}/latest-no-pending`)
+      if (!res.data) {
+        return null
+      }
       return res.data
     } catch (e) {
-      if (e.statusCode === 404) {
+      if (e.status == 404) {
         console.log(`Channel not found for user ${this.user}`)
         return null
       }
+      console.log('Error getting latest state no pending ops:', e)
+      throw e
+    }
+  }
+
+  async getLastThreadUpdateId(): Promise<number> {
+    try {
+      const res = await this.networking.get(`thread/${this.user}/last-update-id`)
+      if (!res.data) {
+        return 0
+      }
+      return res.data.latestThreadUpdateId
+    } catch (e) {
+      if (e.status == 404) {
+        console.log(`Thread update not found for user ${this.user}`)
+        return 0
+      }
+      console.log('Error getting latest state no pending ops:', e)
+      throw e
+    }
+  }
+
+  async getLatestChannelStateAndUpdate(): Promise<{state: ChannelState, update: UpdateRequest} | null> {
+    try {
+      const res = await this.networking.get(`channel/${this.user}/latest-update`)
+      if (!res.data) {
+        return null
+      }
+      return { state: res.data.state, update: channelUpdateToUpdateRequest(res.data) }
+    } catch (e) {
+      if (e.status == 404) {
+        console.log(`Channel not found for user ${this.user}`)
+        return null
+      }
+      console.log('Error getting latest state:', e)
       throw e
     }
   }
@@ -164,10 +211,32 @@ class HubAPIClient implements IHubAPIClient {
     }
   }
 
-  async getThreadInitialStates(): Promise<UnsignedThreadState[]> {
+  async getThreadInitialStates(): Promise<ThreadState[]> {
     // get the current channel state and return it
     const response = await this.networking.get(
       `thread/${this.user}/initial-states`,
+    )
+    if (!response.data) {
+      return []
+    }
+    return response.data
+  }
+
+  async getActiveThreads(): Promise<ThreadState[]> {
+    // get the current channel state and return it
+    const response = await this.networking.get(
+      `thread/${this.user}/active`,
+    )
+    if (!response.data) {
+      return []
+    }
+    return response.data
+  }
+
+  async getAllThreads(): Promise<ThreadState[]> {
+    // get the current channel state and return it
+    const response = await this.networking.get(
+      `thread/${this.user}/all`,
     )
     if (!response.data) {
       return []
@@ -227,6 +296,27 @@ class HubAPIClient implements IHubAPIClient {
   ): Promise<PurchasePaymentHubResponse> {
     const { data } = await this.networking.post('payments/purchase', { meta, payments })
     return data
+  }
+
+  async redeem(secret: string, txCount: number, lastThreadUpdateId: number,): Promise<PurchasePaymentHubResponse & { amount: Payment}> {
+    try {
+      const response = await this.networking.post(
+        `payments/redeem/${this.user}`,
+        { 
+          secret,
+          lastChanTx: txCount,
+          lastThreadUpdateId, 
+        },
+      )
+      return response.data
+    } catch (e) {
+      console.log(e.message)
+      if (e.message.indexOf("Payment has been redeemed.") != -1) {
+        throw new Error(`Payment has been redeemed.`)
+      }
+      throw e
+    }
+    
   }
 
   // post to hub telling user wants to deposit
@@ -299,18 +389,6 @@ class HubAPIClient implements IHubAPIClient {
     )
     return response.data
   }
-}
-
-// connext constructor options
-// NOTE: could extend ContractOptions, doesnt for future readability
-export interface ConnextOptions {
-  web3: Web3
-  hubUrl: string
-  contractAddress: string
-  hubAddress: Address
-  hub?: IHubAPIClient
-  tokenAddress?: Address
-  tokenName?: string
 }
 
 export abstract class IWeb3TxWrapper {
@@ -680,11 +758,12 @@ export class ChannelManager implements IChannelManager {
 export interface ConnextClientOptions {
   web3: Web3
   hubUrl: string
+  user: string
   contractAddress: string
   hubAddress: Address
   tokenAddress: Address
-  tokenName: string
-  user: string
+  ethNetworkId?: string
+  tokenName?: string
   gasMultiple?: number
 
   // Clients should pass in these functions which the ConnextClient will use
@@ -701,12 +780,36 @@ export interface ConnextClientOptions {
   contract?: IChannelManager
 }
 
+function hubConfigToClientOpts(config: HubConfig) {
+  return {
+    contractAddress: config.channelManagerAddress.toLowerCase(),
+    hubAddress: config.hubWalletAddress.toLowerCase(),
+    tokenAddress: config.tokenAddress.toLowerCase(),
+    ethNetworkId: config.ethNetworkId.toLowerCase(),
+  }
+}
 
 /**
  * Used to get an instance of ConnextClient.
  */
-export function getConnextClient(opts: ConnextClientOptions): ConnextClient {
-  return new ConnextInternal(opts)
+export async function getConnextClient(opts: ConnextClientOptions): Promise<ConnextClient> {
+  // create a new hub and pass into the client
+  let hub = opts.hub
+  if (!hub) {
+    hub = new HubAPIClient(
+      opts.user,
+      new Networking(opts.hubUrl),
+    )
+  }
+  const hubOpts = hubConfigToClientOpts(await hub.config())
+  let merged = { ...opts }
+  for (let k in hubOpts) {
+    if ((opts as any)[k]) {
+      continue
+    }
+    (merged as any)[k] = (hubOpts as any)[k]
+  }
+  return new ConnextInternal({ ...merged })
 }
 
 /**
@@ -767,6 +870,10 @@ export abstract class ConnextClient extends EventEmitter {
   async requestCollateral(): Promise<void> {
     await this.internal.collateralController.requestCollateral()
   }
+
+  async redeem(secret: string): Promise<{ purchaseId: string }> {
+    return await this.internal.redeemController.redeem(secret)
+  }
 }
 
 /**
@@ -789,6 +896,7 @@ export class ConnextInternal extends ConnextClient {
   stateUpdateController: StateUpdateController
   collateralController: CollateralController
   threadsController: ThreadsController
+  redeemController: RedeemController
 
   constructor(opts: ConnextClientOptions) {
     super(opts)
@@ -805,6 +913,10 @@ export class ConnextInternal extends ConnextClient {
       this.opts.tokenName,
     )
 
+    opts.user = opts.user.toLowerCase()
+    opts.hubAddress = opts.hubAddress.toLowerCase()
+    opts.contractAddress = opts.contractAddress.toLowerCase()
+
     this.validator = new Validator(opts.web3, opts.hubAddress)
     this.contract = opts.contract || new ChannelManager(opts.web3, opts.contractAddress, opts.gasMultiple || 1.5)
 
@@ -817,6 +929,7 @@ export class ConnextInternal extends ConnextClient {
     this.stateUpdateController = new StateUpdateController('StateUpdateController', this)
     this.collateralController = new CollateralController('CollateralController', this)
     this.threadsController = new ThreadsController('ThreadsController', this)
+    this.redeemController = new RedeemController('RedeemController', this)
   }
 
   private getControllers(): AbstractController[] {
@@ -839,13 +952,83 @@ export class ConnextInternal extends ConnextClient {
     await this.withdrawalController.requestUserWithdrawal(params)
   }
 
+  async syncConfig() {
+    const config = await this.hub.config()
+    const opts = this.opts
+    const adjusted = Object.keys(opts).map(k => {
+      if (k || Object.keys(opts).indexOf(k) == -1) {
+        // user supplied, igonore
+        return (opts as any)[k]
+      }
+
+      return (config as any)[k]
+    })
+    return adjusted
+  }
+
   async start() {
     this.store = await this.getStore()
-    this.store.subscribe(() => {
+    this.store.subscribe(async () => {
       const state = this.store.getState()
       this.emit('onStateChange', state)
-      this._saveState(state)
+      await this._saveState(state)
     })
+
+    // before starting controllers, sync values
+    await this.syncConfig()
+
+    // TODO: appropriately set the latest
+    // valid state ??
+    const channelAndUpdate = await this.hub.getLatestChannelStateAndUpdate()
+    console.log('Found latest double signed state:', JSON.stringify(channelAndUpdate, null, 2))
+    if (channelAndUpdate) {
+      this.store.dispatch(actions.setChannelAndUpdate(channelAndUpdate))
+      
+      // update the latest valid state
+      const latestValid = await this.hub.getLatestStateNoPendingOps()
+      console.log('latestValid:', latestValid)
+      if (latestValid) {
+        this.store.dispatch(actions.setLatestValidState(latestValid))
+      }
+      // unconditionally update last thread update id, thread history
+      const lastThreadUpdateId = await this.hub.getLastThreadUpdateId()
+      console.log('lastThreadUpdateId:', lastThreadUpdateId)
+      this.store.dispatch(actions.setLastThreadUpdateId(lastThreadUpdateId))
+      // extract thread history, sort by descending threadId
+      const threadHistoryDuplicates = (await this.hub.getAllThreads()).map(t => {
+        return {
+          sender: t.sender,
+          receiver: t.receiver,
+          threadId: t.threadId,
+        }
+      }).sort((a, b) => b.threadId - a.threadId)
+      console.log('threadHistoryDuplicates', threadHistoryDuplicates)
+      // filter duplicates
+      const threadHistory = threadHistoryDuplicates.filter((thread, i) => {
+        const search = JSON.stringify({ 
+          sender: thread.sender,
+          receiver: thread.receiver
+        })
+        const elts = threadHistoryDuplicates.map(t => {
+          return JSON.stringify({ sender: t.sender, receiver: t.receiver })
+        })
+        return elts.indexOf(search) == i
+      })
+      console.log('threadHistory:', threadHistory)
+      this.store.dispatch(actions.setThreadHistory(threadHistory))
+
+      // if thread count is greater than 0, update
+      // activeThreads, initial states
+      if (channelAndUpdate.state.threadCount > 0) {
+        const initialStates = await this.hub.getThreadInitialStates()
+        console.log('initialStates:', initialStates)
+        this.store.dispatch(actions.setActiveInitialThreadStates(initialStates))
+
+        const threadRows = await this.hub.getActiveThreads()
+        console.log('threadRows:', threadRows)
+        this.store.dispatch(actions.setActiveThreads(threadRows))
+      }
+    }
 
     // Start all controllers
     for (let controller of this.getControllers()) {
@@ -865,15 +1048,28 @@ export class ConnextInternal extends ConnextClient {
     await super.stop()
   }
 
-
   dispatch(action: Action): void {
     this.store.dispatch(action)
   }
 
+  generateSecret(): string {
+    return Web3.utils.soliditySha3({
+      type: 'bytes32', value: Web3.utils.randomHex(32)
+    })
+  }
+
+  async sign(hash: string, user: string) {
+    return await (
+      this.opts.web3.eth.personal
+        ? (this.opts.web3.eth.personal.sign as any)(hash, user)
+        : this.opts.web3.eth.sign(hash, user)
+    )
+  }
+
   async signChannelState(state: UnsignedChannelState): Promise<ChannelState> {
     if (
-      state.user != this.opts.user ||
-      state.contractAddress != this.opts.contractAddress
+      state.user.toLowerCase() != this.opts.user.toLowerCase() ||
+      state.contractAddress.toLowerCase()!= (this.opts.contractAddress as any).toLowerCase()
     ) {
       throw new Error(
         `Refusing to sign channel state update which changes user or contract: ` +
@@ -885,11 +1081,7 @@ export class ConnextInternal extends ConnextClient {
     const hash = this.utils.createChannelStateHash(state)
 
     const { user, hubAddress } = this.opts
-    const sig = await (
-      process.env.DEV || user === hubAddress
-        ? this.opts.web3.eth.sign(hash, user)
-        : (this.opts.web3.eth.personal.sign as any)(hash, user)
-    )
+    const sig = await this.sign(hash, user)
 
     console.log(`Signing channel state ${state.txCountGlobal}: ${sig}`, state)
     return addSigToChannelState(state, sig, true)
@@ -910,11 +1102,7 @@ export class ConnextInternal extends ConnextClient {
 
     const hash = this.utils.createThreadStateHash(state)
 
-    const sig = await (
-      process.env.DEV
-        ? this.opts.web3.eth.sign(hash, this.opts.user)
-        : (this.opts.web3.eth.personal.sign as any)(hash, this.opts.user)
-    )
+    const sig = await this.sign(hash, this.opts.user)
 
     console.log(`Signing thread state ${state.txCount}: ${sig}`, state)
     return addSigToThreadState(state, sig)
@@ -922,11 +1110,7 @@ export class ConnextInternal extends ConnextClient {
 
   public async signDepositRequestProposal(args: Omit<SignedDepositRequestProposal, 'sigUser'>, ): Promise<SignedDepositRequestProposal> {
     const hash = this.utils.createDepositRequestProposalHash(args)
-    const sig = await (
-      process.env.DEV
-        ? this.opts.web3.eth.sign(hash, this.opts.user)
-        : (this.opts.web3.eth.personal.sign as any)(hash, this.opts.user)
-    )
+    const sig = await this.sign(hash, this.opts.user)
 
     console.log(`Signing deposit request ${JSON.stringify(args, null, 2)}. Sig: ${sig}`)
     return { ...args, sigUser: sig }
@@ -1017,7 +1201,7 @@ export class ConnextInternal extends ConnextClient {
     const state = new ConnextState()
     state.persistent.channel = {
       ...state.persistent.channel,
-      contractAddress: this.opts.contractAddress,
+      contractAddress: this.opts.contractAddress || '', // TODO: how to handle this while undefined?
       user: this.opts.user,
       recipient: this.opts.user,
     }

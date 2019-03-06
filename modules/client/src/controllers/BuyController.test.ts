@@ -1,6 +1,4 @@
 import { MockConnextInternal, MockStore } from '../testing/mocks'
-import { assert, mkHash } from '../testing/index'
-import { PaymentArgs, } from '@src/types'
 // @ts-ignore
 global.fetch = require('node-fetch-polyfill');
 
@@ -28,7 +26,7 @@ describe('BuyController: unit tests', () => {
   //         amount: { amountToken: '1', amountWei: '0' },
   //         type: 'PT_CHANNEL',
   //         meta: {},
-  //         recipient: '$$HUB$$',
+  //         recipient: process.env.HUB_ADDRESS,
   //       },
   //     ],
   //   })

@@ -1,7 +1,7 @@
 import { mkHash, getWithdrawalArgs, getExchangeArgs } from '.'
 import { IWeb3TxWrapper } from '../Connext'
 import { toBN } from '../helpers/bn'
-import { ExchangeArgsBN, DepositArgs, DepositArgsBN, ChannelState, Address, ThreadState, convertThreadState, convertChannelState, addSigToChannelState, UpdateRequest, WithdrawalParameters, convertWithdrawalParameters, Sync, addSigToThreadState, ThreadHistoryItem, ThreadStateBN, SignedDepositRequestProposal, Omit, ThreadStateUpdate } from '../types'
+import { ExchangeArgsBN, DepositArgs, DepositArgsBN, ChannelState, Address, ThreadState, convertThreadState, convertChannelState, addSigToChannelState, UpdateRequest, WithdrawalParameters, convertWithdrawalParameters, Sync, addSigToThreadState, ThreadHistoryItem, ThreadStateBN, SignedDepositRequestProposal, Omit, ThreadStateUpdate, HubConfig } from '../types'
 import { SyncResult } from '../types'
 import { getThreadState, PartialSignedOrSuccinctChannel, PartialSignedOrSuccinctThread, getPaymentArgs } from '.'
 import { UnsignedThreadState } from '../types'
@@ -184,8 +184,53 @@ export class MockChannelManager implements IChannelManager {
 export class MockHub implements IHubAPIClient {
   receivedUpdateRequests: UpdateRequest[] = []
 
+  async config(): Promise<HubConfig> {
+    //TODO: implement correctly
+    return {} as any
+  }
+
+  async redeem(secret: string): Promise<PurchasePaymentHubResponse & { amount: Payment }> {
+    // NOTE: by default assumes this is redeemers first payment
+    // if this is not what you are testing against, must use
+    // the patch functions in test
+    return {
+      purchaseId: 'async-payment-bb',
+      sync: { status: "CS_OPEN", 
+      updates: [{
+        type: 'channel',
+        update: {
+          reason: 'ProposePendingDeposit',
+          createdOn: new Date(),
+          args: getDepositArgs('full', {
+            depositToken: [0, 1],
+            depositWei: [0, 0],
+          }),
+          sigHub: mkHash('0x51512'),
+          sigUser: '',
+          txCount: 1,
+        },
+      }]},
+      amount: {
+        amountWei: '0',
+        amountToken: '1',
+      }
+    }
+  }
+
   async getChannel(): Promise<ChannelRow> {
     return { id: 0, state: getChannelState('full'), status: 'CS_OPEN' }
+  }
+
+  async getActiveThreads(): Promise<ThreadState[]> {
+    return []
+  }
+
+  async getLastThreadUpdateId(): Promise<number> {
+    return 0
+  }
+
+  async getAllThreads(): Promise<ThreadState[]> {
+    return []
   }
 
   async getChannelStateAtNonce(): Promise<ChannelStateUpdate> {
@@ -196,7 +241,7 @@ export class MockHub implements IHubAPIClient {
     }
   }
 
-  async getThreadInitialStates(): Promise<UnsignedThreadState[]> {
+  async getThreadInitialStates(): Promise<ThreadState[]> {
     return [getThreadState('full')]
   }
 
@@ -223,7 +268,7 @@ export class MockHub implements IHubAPIClient {
         console.log("TEST INCLUSION")
         this.receivedUpdateRequests.push(p.update as UpdateRequest)
       }
-      if (p.type == 'PT_CHANNEL') {
+      if (p.type == 'PT_CHANNEL' || 'PT_LINK') {
         return {
           type: 'channel',
           update: {
@@ -238,7 +283,11 @@ export class MockHub implements IHubAPIClient {
       } else {
         return {
           type: 'thread',
-          update: { state: p.update.state, id: p.update.state.threadId, createdOn: new Date() }
+          update: { 
+            state: (p.update as any).state, 
+            id: (p.update as any).state.threadId, 
+            createdOn: new Date() 
+          }
         } as SyncResult
       }
     })
@@ -369,10 +418,16 @@ export class MockHub implements IHubAPIClient {
     update.createdOn = new Date();
     return update
   }
-  getLatestChannelState(): Promise<ChannelState | null>  {
-    let store = new MockStore
-    //@ts-ignore
-    return store._initialState.persistent.channel as ChannelState | null
+  
+  async getLatestChannelStateAndUpdate() {
+    return null
+    // let store = new MockStore()
+    // //@ts-ignore
+    // return {state: store._initialState.persistent.channel, update: store._initialState.persistent.channelUpdate}
+  }
+
+  async getLatestStateNoPendingOps(): Promise<ChannelState | null> {
+    return null
   }
 
   assertReceivedUpdate(expected: PartialUpdateRequest) {

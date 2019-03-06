@@ -66,6 +66,7 @@ import { default as ChannelManagerABI } from './abi/ChannelManager'
 import { CloseChannelService } from './CloseChannelService'
 import ChannelDisputesDao, { PostgresChannelDisputesDao } from './dao/ChannelDisputesDao';
 import { CoinPaymentsDepositPollingService } from './coinpayments/CoinPaymentsDepositPollingService'
+import ConfigApiService from './api/ConfigApiService';
 
 export default function defaultRegistry(otherRegistry?: Registry): Registry {
   const registry = new Registry(otherRegistry)
@@ -163,6 +164,7 @@ export const serviceDefinitions: PartialServiceDefinitions = {
       ChannelsApiService,
       BrandingApiService,
       AuthApiService,
+      ConfigApiService,
       ExchangeRateApiService,
       ThreadsApiService,
       PaymentsApiService,
@@ -177,14 +179,16 @@ export const serviceDefinitions: PartialServiceDefinitions = {
       gasEstimateDao: GasEstimateDao,
       onchainTransactionDao: OnchainTransactionsDao,
       db: DBEngine,
-      container: Container,
-    ) => new OnchainTransactionService(web3, gasEstimateDao, onchainTransactionDao, db, container),
+      signerService: SignerService,
+      container: Container
+    ) => new OnchainTransactionService(web3, gasEstimateDao, onchainTransactionDao, db, signerService, container),
     dependencies: [
       'Web3',
       'GasEstimateDao',
       'OnchainTransactionsDao',
       'DBEngine',
-      'Container',
+      'SignerService',
+      'Container'
     ],
     isSingleton: true,
   },
@@ -253,7 +257,8 @@ export const serviceDefinitions: PartialServiceDefinitions = {
   },
 
   GlobalSettingsDao: {
-    factory: (db: DBEngine<Client>) => new PostgresGlobalSettingsDao(db),
+    factory: (db: DBEngine<Client>) => 
+      new PostgresGlobalSettingsDao(db),
     dependencies: ['DBEngine'],
     isSingleton: true
   },
@@ -366,7 +371,6 @@ export const serviceDefinitions: PartialServiceDefinitions = {
       validator: Validator,
       config: Config,
       db: DBEngine,
-      contract: ChannelManager,
     ) => new PaymentsService(
       channelsService,
       threadsService,
@@ -401,6 +405,7 @@ export const serviceDefinitions: PartialServiceDefinitions = {
       threadsDao: ThreadsDao,
       exchangeRateDao: ExchangeRateDao,
       channelDisputesDao: ChannelDisputesDao,
+      onchainTransactionDao: OnchainTransactionsDao,
       generator: StateGenerator,
       validation: Validator,
       redis: RedisClient,
@@ -417,6 +422,7 @@ export const serviceDefinitions: PartialServiceDefinitions = {
         threadsDao,
         exchangeRateDao,
         channelDisputesDao,
+        onchainTransactionDao,
         generator,
         validation,
         redis,
@@ -433,6 +439,7 @@ export const serviceDefinitions: PartialServiceDefinitions = {
       'ThreadsDao',
       'ExchangeRateDao',
       'ChannelDisputesDao',
+      'OnchainTransactionsDao',
       'StateGenerator',
       'Validator',
       'RedisClient',
