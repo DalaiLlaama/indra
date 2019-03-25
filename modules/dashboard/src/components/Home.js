@@ -125,9 +125,9 @@ class Home extends React.Component {
   }
 
   async componentDidMount() {
-    // await this.getHubConfig();
-    // await this.getContractInfo();
-    // await this.getWalletInfo(this.state.hubWallet.address);
+    await this.getHubConfig();
+    await this.getContractInfo();
+    await this.getWalletInfo(this.state.hubWallet.address);
   }
 
   async getHubConfig() {

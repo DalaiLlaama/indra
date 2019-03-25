@@ -14,6 +14,9 @@ const get = async (url) => {
     } else if (res.data && res.data.rows && res.data.rows.length >= 1) {
       console.log(`Got ${res.data.rows.length} rows from ${url}: ${JSON.stringify(res.data.rows)}`)
       return res.data.rows
+    } else if (res.data) {
+      console.log(`Got a single object from ${url}: ${JSON.stringify(res.data)}`)
+      return [res.data]
     } else {
       console.warn(`Couldn't get ${url}: ${JSON.stringify(res)}`)
       return null

@@ -28,7 +28,7 @@ const ContractInfoCard = props => {
           ) : (
             <>
               <Typography className={classes.pos} color="textSecondary">
-                <a href={`https://rinkeby.etherscan.io/address/${contractAddress}`} target="_blank" rel="noopener noreferrer">{contractAddress}</a>
+                <a href={`https://ropsten.etherscan.io/address/${contractAddress}`} target="_blank" rel="noopener noreferrer">{contractAddress}</a>
               </Typography>
               <Typography variant="h5" component="h2">
                 {parseFloat(wei.formatted).toFixed(2)}... ETH ({wei.raw} Wei)
@@ -47,5 +47,5 @@ const ContractInfoCard = props => {
       </Card>
     );
   };
-  
+
   export const ContractInfoCardStyled = withStyles(styles)(ContractInfoCard);

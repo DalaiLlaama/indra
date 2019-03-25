@@ -39,7 +39,7 @@ class GasCostCard extends Component {
   }
 
   setGas = async () => {
-    const res = await get(`gascost/all`);
+    const res = await get(`gasPrice/estimate`);
     if (res && res.sum) {
       this.setState({ gasTotal: res.sum });
     } else {
@@ -48,7 +48,7 @@ class GasCostCard extends Component {
   };
 
   setGasLastWeek = async () => {
-    const res = await get(`gascost/trailingweek`);
+    const res = await get(`gasPrice/trailingweek`);
     if (res && res.sum) {
       this.setState({ gasLastWeek: res.sum });
     } else {
@@ -57,7 +57,7 @@ class GasCostCard extends Component {
   };
 
   setGasLastDay = async () => {
-    const res = await get(`gascost/trailing24`);
+    const res = await get(`gasPrice/trailing24`);
     if (res && res.sum) {
       this.setState({ gasLastDay: res.sum });
     } else {

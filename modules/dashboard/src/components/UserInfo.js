@@ -34,7 +34,7 @@ class UserInfo extends Component {
   searchByAddress = async () => {
       console.log(`address: ${this.state.addressInput}`);
       console.log(`number: ${this.state.numberOfRecords}`)
-    const res = await get(`users/${this.state.addressInput}/${this.state.numberOfRecords}`);
+    const res = await get(`channel/${this.state.addressInput}`);
     if (res.length>0) {
       this.setState({ userInfo: res });
     } else {
@@ -81,7 +81,7 @@ class UserInfo extends Component {
           </div>
           <div>
             {this.state.userInfo ? (
-              <Typography variant="body1">{this.state.userInfo}</Typography>
+              <Typography variant="body1">{JSON.stringify(this.state.userInfo[0])}</Typography>
             ) : null}
           </div>
         </CardContent>
