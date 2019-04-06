@@ -1,3 +1,4 @@
+require('dotenv').config();
 const fs = require('fs');
 const { Pool } = require('pg');
 
@@ -13,6 +14,11 @@ if (process.env.POSTGRES_PASSWORD_FILE) {
   password = 'supersecret'
 }
 
+console.log('starting server in env')
+console.log(` - host: ${host}`)
+console.log(` - user: ${user}`)
+console.log(` - database: ${database}`)
+
 const pool = new Pool({
   connectionString: `postgres://${user}:${password}@${host}/${database}`
 })
@@ -21,7 +27,8 @@ const query = async (sql) =>{
     try {
         return await pool.query(sql);
     } catch(e) {
-        console.log(`Error: ${JSON.stringify(e.stack)}`)
+        console.error(`Error: ${e.message}`)
+        console.error(`Could not process query: ${sql}`)
         return null;
     }
 };

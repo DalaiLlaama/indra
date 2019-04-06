@@ -6,27 +6,28 @@ import { TextField } from "@material-ui/core";
 import CardContent from "@material-ui/core/CardContent";
 import Typography from "@material-ui/core/Typography";
 import { withStyles } from "@material-ui/core/styles";
-import get from "../get";
-import Table from '@material-ui/core/Table';
-import TableBody from '@material-ui/core/TableBody';
-import TableCell from '@material-ui/core/TableCell';
-import TableHead from '@material-ui/core/TableHead';
-import TableRow from '@material-ui/core/TableRow';
+import Table from "@material-ui/core/Table";
+import TableBody from "@material-ui/core/TableBody";
+import TableCell from "@material-ui/core/TableCell";
+import TableHead from "@material-ui/core/TableHead";
+import TableRow from "@material-ui/core/TableRow";
+import Switch from "@material-ui/core/Switch";
 import { VictoryChart, VictoryLine, VictoryLabel, VictoryAxis } from "victory";
-
+import DatePicker from "react-datepicker";
+import axios from "axios";
+import "react-datepicker/dist/react-datepicker.css";
 
 const styles = theme => ({
   card: {
     minWidth: "40%",
-    textAlign: "left",
-    marginBottom:"3%"
+    marginBottom: "3%"
   },
   content: {
     flexGrow: 1,
     padding: theme.spacing.unit * 3,
     height: "100vh",
     overflow: "auto"
-  },
+  }
 });
 
 class PaymentInfoCard extends Component {
@@ -35,18 +36,92 @@ class PaymentInfoCard extends Component {
     this.state = {
       totalPayments: null,
       paymentsLastDay: null,
-      averagePaymentWei: null,
-      averagePaymentToken: null,
-      averagePaymentWeiLastDay: null,
-      averagePaymentTokenLastDay: null,
+      averagePaymentWei: {
+        raw: null,
+        formatted: null
+      },
+      averagePaymentToken: {
+        raw: null,
+        formatted: null
+      },
+      averagePaymentWeiLastDay: {
+        raw: null,
+        formatted: null
+      },
+      averagePaymentTokenLastDay: {
+        raw: null,
+        formatted: null
+      },
       idInput: "",
       paymentInfo: null,
-      freqArray: null
+      freqArray: null,
+      paymentsLastWeek: null,
+      paymentsLastWeekPct: null,
+      paymentsLastDayPct: null,
+      averagePaymentWeiLastWeek: {
+        raw: null,
+        formatted: null
+      },
+      averagePaymentTokenLastWeek: {
+        raw: null,
+        formatted: null
+      },
+      paymentCountRange:null,
+      averagePaymentTokenRange: {
+        raw: null,
+        formatted: null
+      },
+      view: false,
+      checked: false,
+      startDate: new Date(),
+      endDate: new Date(),
     };
   }
 
+
+/*********************
+ * Handlers and Hooks
+ */
+
+  handleChange = evt => {
+    this.setState({ idInput: evt.target.value });
+  };
+
+  handleStartChange = (date) => {
+    this.setState({
+      startDate: date
+    })
+  }
+
+  handleEndChange = (date) => {
+    this.setState({
+      endDate: date
+    })
+  }
+
+  _handleRefresh = async () => {
+    await this.setTrailing();
+    await this.setTotal();
+    await this.setAverage();
+    await this.setAverageTrailing();
+    await this.setTrailingWeek();
+    await this.setTrailingWeekPct();
+    await this.setTrailingPct();
+    await this.setAverageTrailingWeek();
+    //await this.setFrequency();
+  };
+
+  componentDidMount = async () => {
+    await this._handleRefresh()
+  };
+
+  /**************************
+   * Payment trends
+   */
+
   setTotal = async () => {
-    const res = await get(`payments/total`);
+    const url = `${this.props.urls.api}/payments/total`
+    const res = (await axios.get(url)).data || null
     if (res) {
       this.setState({ totalPayments: res.count });
     } else {
@@ -54,8 +129,11 @@ class PaymentInfoCard extends Component {
     }
   };
 
+  //Trailing Day
+
   setTrailing = async () => {
-    const res = await get(`payments/trailing24`);
+    const url = `${this.props.urls.api}/payments/trailing24`
+    const res = (await axios.get(url)).data || null
     if (res) {
       this.setState({ paymentsLastDay: res.count });
     } else {
@@ -63,97 +141,184 @@ class PaymentInfoCard extends Component {
     }
   };
 
+  setTrailingPct = async () => {
+    const url = `${this.props.urls.api}/payments/trailing24/pctchange`
+    const res = (await axios.get(url)).data || null
+    if (res) {
+      console.log(`trailing day pct res ${JSON.stringify(res)}`)
+
+      this.setState({ paymentsLastDayPct: res["pctchange"] });
+    } else {
+      this.setState({ paymentsLastDayPct: "N/A" });
+    }
+  };
+
+  //Trailing Week
+
+  setTrailingWeek = async () => {
+    const url = `${this.props.urls.api}/payments/trailingweek`
+    const res = (await axios.get(url)).data || null
+    if (res) {
+      this.setState({ paymentsLastWeek: res.count });
+    } else {
+      this.setState({ paymentsLastWeek: "N/A" });
+    }
+  };
+
+  setTrailingWeekPct = async () => {
+    const url = `${this.props.urls.api}/payments/trailingweek/pctchange`
+    const res = (await axios.get(url)).data || null
+    if (res) {
+      console.log(`trailing week pct res ${JSON.stringify(res)}`)
+      this.setState({ paymentsLastWeekPct: res["pctchange"] });
+    } else {
+      this.setState({ paymentsLastWeekPct: "N/A" });
+    }
+  };
+
+  /********************
+   * Average Payments
+   */
+
   setAverage = async () => {
-    const res = await get(`payments/average/all`);
+    const { web3 } = this.props;
+    const url = `${this.props.urls.api}/payments/average/all`
+    const res = (await axios.get(url)).data || null
     if (res && res.avg_wei_payment && res.avg_token_payment) {
-      this.setState({
-        averagePaymentWei: res.avg_wei_payment,
-        averagePaymentToken: res.avg_token_payment
+      let tokenDeposit = String(Math.trunc(res.avg_token_payment));
+      let weiDeposit = String(Math.trunc(res.avg_wei_payment));
+      this.setState(state => {
+        state.averagePaymentWei.raw = res.avg_wei_payment;
+        state.averagePaymentToken.raw = res.avg_token_payment;
+        state.averagePaymentWei.formatted = web3.utils.fromWei(weiDeposit);
+        state.averagePaymentToken.formatted = web3.utils.fromWei(tokenDeposit);
+        return state;
       });
     } else {
-      this.setState({
-        averagePaymentWei: "N/A",
-        averagePaymentToken: "N/A"
+      this.setState(state => {
+        state.averagePaymentWei.formatted = "N/A";
+        state.averagePaymentToken.formatted = "N/A";
+        return state;
       });
     }
   };
 
   setAverageTrailing = async () => {
-    const res = await get(`payments/average/trailing24`);
+    const { web3 } = this.props;
+    const url = `${this.props.urls.api}/payments/average/trailing24`
+    const res = (await axios.get(url)).data || null
     if (res && res.avg_wei_payment && res.avg_token_payment) {
-      this.setState({
-        averagePaymentWeiLastDay: res.avg_wei_payment,
-        averagePaymentTokenLastDay: res.avg_token_payment
+      let tokenPayment = String(Math.trunc(res.avg_token_payment));
+      let weiPayment = String(Math.trunc(res.avg_wei_payment));
+      this.setState(state => {
+        state.averagePaymentWeiLastDay.raw = res.avg_wei_payment;
+        state.averagePaymentTokenLastDay.raw = res.avg_token_payment;
+        state.averagePaymentWeiLastDay.formatted = web3.utils.fromWei(
+          weiPayment
+        );
+        state.averagePaymentTokenLastDay.formatted = web3.utils.fromWei(
+          tokenPayment
+        );
+        return state;
       });
     } else {
-      this.setState({
-        averagePaymentWeiLastDay: "N/A",
-        averagePaymentTokenLastDay: "N/A"
+      this.setState(state => {
+        state.averagePaymentWeiLastDay.formatted = "N/A";
+        state.averagePaymentTokenLastDay.formatted = "N/A";
+        return state;
       });
     }
   };
+
+  setAverageTrailingWeek = async () => {
+    const { web3 } = this.props;
+    const url = `${this.props.urls.api}/payments/average/trailingweek`
+    const res = (await axios.get(url)).data || null
+    if (res && res.avg_wei_payment && res.avg_token_payment) {
+      let tokenPayment = String(Math.trunc(res.avg_token_payment));
+      let weiPayment = String(Math.trunc(res.avg_wei_payment));
+      this.setState(state => {
+        state.averagePaymentWeiLastWeek.raw = res.avg_wei_payment;
+        state.averagePaymentTokenLastWeek.raw = res.avg_token_payment;
+        state.averagePaymentWeiLastWeek.formatted = web3.utils.fromWei(
+          weiPayment
+        );
+        state.averagePaymentTokenLastWeek.formatted = web3.utils.fromWei(
+          tokenPayment
+        );
+        return state;
+      });
+    } else {
+      this.setState(state => {
+        state.averagePaymentWeiLastWeek.formatted = "N/A";
+        state.averagePaymentTokenLastWeek.formatted = "N/A";
+        return state;
+      });
+    }
+  };
+
+  /********************
+   * Search by ID
+   */
 
   searchById = async id => {
-    const res = await get(`payments/${id}`);
-    if (res.length>0) {
+    const url = `${this.props.urls.api}/payments/${id}`
+    const res = (await axios.get(url)).data || null
+    if (res) {
       this.setState({ paymentInfo: res });
     } else {
-      this.setState({ paymentInfo: "ID not found" });
+      this.setState({ paymentInfo: "Purchase not found" });
     }
   };
 
-  setFrequency = async() =>{
-    const res = get(`payments/frequency`);
-    if (res.data){
-      this.setState({freqArray: res.data})
+   /********************
+   * Get values for date range
+   */
+  fetchDateRange = async() => {
+
+    let start = this.state.startDate.toISOString().split('T')[0];
+    let end = this.state.endDate.toISOString().split('T')[0];
+
+    console.log(`Fetching date range: ${start} - ${end}`)
+    const { web3 } = this.props;
+    const url = `${this.props.urls.api}/payments/daterange/${start}/${end}`
+    const res = (await axios.get(url)).data || null
+    if (res) {
+      let tokenPayment = String(Math.trunc(res.avg_token_payment));
+      let count = res.count
+      //let weiPayment = String(Math.trunc(res.avg_wei_payment));
+      this.setState(state => {
+        state.averagePaymentTokenRange.raw = res.avg_token_payment;
+        state.averagePaymentTokenRange.formatted = web3.utils.fromWei(
+          tokenPayment
+        );
+        state.paymentCountRange= count;
+        return state;
+      });
+      console.log(this.state.paymentCountRange);
+    } else {
+      this.setState(state => {
+        state.averagePaymentTokenRange.formatted = "N/A";
+        state.paymentCountRange = "N/A";
+        return state;
+      });
     }
   }
 
-  setChart = () => {
-    // TESTING DATA
-    // let data = [
-    //   { day: 1, count: 10 },
-    //   { day: 2, count: 14 },
-    //   { day: 3, count: 8 }
-    // ];
-    // const toRender = (
-    //   <VictoryChart width={140} height={140}
-    //     style={{
-    //       labels:{
-    //         fontSize:4
-    //       }
-    //     }}>
-    //       <VictoryLabel x={50} y={40}
-    //         text="Payments this Week"
-    //         style={{fontSize:4}}
-    //       />
-    //       <VictoryLine
-            
-    //         x="day"
-    //         y="count"
-    //         standalone={false}
-    //         style={{ data: { strokeWidth: 0.1 } }}
-    //         data={data}
-    //       />
-    //       <VictoryAxis
-    //         domain={{y: [0, 100] }}
-    //         dependentAxis={true}
-    //         label="Withdrawals"
-    //         style={{ axisLabel: { fontSize: 2 }, tickLabels: { fontSize: 2 } }}
-    //       />
-    //       <VictoryAxis
-    //         dependentAxis={false}
-    //         domain={{ x: [0, 7]}}
-    //         tickValues={[0, 1, 2, 3, 4, 5, 6, 7]}
-    //         label="Day"
-    //         style={{ axisLabel: { fontSize: 2 }, tickLabels: { fontSize: 2 } }}
-    //       />
-    // </VictoryChart> 
-    // );
-    // console.log(toRender);
-    // return toRender;
 
-    
+  /********************
+   * Chart of past week (commented out)
+   */
+
+  setFrequency = async () => {
+    const url = `${this.props.urls.api}/payments/frequency`
+    const res = (await axios.get(url)).data || null
+    if (res) {
+      this.setState({ freqArray: res });
+    }
+  };
+
+  setChart = () => {
     if (this.state.freqArray) {
       // TESTING DATA
       // let data = [
@@ -162,19 +327,23 @@ class PaymentInfoCard extends Component {
       //   {day:"3", count:8}
       // ]
 
-    const toRender = (
-      <VictoryChart width={140} height={140}
-        style={{
-          labels:{
-            fontSize:4
-          }
-        }}>
-          <VictoryLabel x={50} y={40}
+      const toRender = (
+        <VictoryChart
+          width={140}
+          height={140}
+          style={{
+            labels: {
+              fontSize: 4
+            }
+          }}
+        >
+          <VictoryLabel
+            x={50}
+            y={40}
             text="Payments this Week"
-            style={{fontSize:4}}
+            style={{ fontSize: 4 }}
           />
           <VictoryLine
-            
             x="day"
             y="count"
             standalone={false}
@@ -182,39 +351,26 @@ class PaymentInfoCard extends Component {
             data={this.state.freqArray}
           />
           <VictoryAxis
-            domain={{y: [0, 100] }}
+            domain={{ y: [0, 100] }}
             dependentAxis={true}
             label="Withdrawals"
             style={{ axisLabel: { fontSize: 2 }, tickLabels: { fontSize: 2 } }}
           />
           <VictoryAxis
             dependentAxis={false}
-            domain={{ x: [0, 7]}}
+            domain={{ x: [0, 7] }}
             tickValues={[0, 1, 2, 3, 4, 5, 6, 7]}
             label="Day"
             style={{ axisLabel: { fontSize: 2 }, tickLabels: { fontSize: 2 } }}
           />
-    </VictoryChart> 
-    );
-    console.log(toRender);
-    return toRender
+        </VictoryChart>
+      );
+      console.log(toRender);
+      return toRender;
       //this.setState({ withdrawalBreakdown: JSON.stringify(res) });
-    } else {
-      console.warn(`Missing data for chart`)
     }
   };
 
-  handleChange = evt => {
-    this.setState({ idInput: evt.target.value });
-  };
-
-  componentDidMount = async () => {
-    await this.setTrailing();
-    await this.setTotal();
-    await this.setAverage();
-    await this.setAverageTrailing();
-    await this.setFrequency();
-  };
 
   render() {
     const { classes } = this.props;
@@ -222,9 +378,11 @@ class PaymentInfoCard extends Component {
 
     return (
       <div className={classes.content}>
-      <Card className={classes.card}>
-      <CardContent>
-        <Typography variant="h5" style={{marginBotton:"5%"}}>Payment Summary Statistics</Typography>
+        <Card className={classes.card}>
+          <CardContent>
+            <Typography variant="h5" style={{ marginBotton: "5%" }}>
+              Payment Summary Statistics
+            </Typography>
             <Table className={classes.table}>
               <TableHead>
                 <TableRow>
@@ -240,7 +398,7 @@ class PaymentInfoCard extends Component {
                     <Typography variant="h6">Count</Typography>
                   </TableCell>
                   <TableCell component="th" scope="row">
-                  {this.state.totalPayments}
+                    {this.state.totalPayments}
                   </TableCell>
                 </TableRow>
                 <TableRow>
@@ -248,72 +406,156 @@ class PaymentInfoCard extends Component {
                     <Typography variant="h6">Average Token Payment</Typography>
                   </TableCell>
                   <TableCell component="th" scope="row">
-                  {this.state.averagePaymentToken}
+                    {this.state.averagePaymentToken.formatted}
                   </TableCell>
                 </TableRow>
                 <TableRow>
                   <TableCell component="th" scope="row">
-                    <Typography variant="h6">Average Wei Payment</Typography>
+                    <Typography variant="h6">Average ETH Payment</Typography>
                   </TableCell>
                   <TableCell component="th" scope="row">
-                  {this.state.averagePaymentWei}
-                  </TableCell>
-                </TableRow>
-                <TableRow>
-                  <TableCell component="th" scope="row">
-                    <Typography variant="h6">Count (Last 24 hours)</Typography>
-                  </TableCell>
-                  <TableCell component="th" scope="row">
-                  {this.state.paymentsLastDay}
-                  </TableCell>
-                </TableRow>
-                <TableRow>
-                  <TableCell component="th" scope="row">
-                    <Typography variant="h6">Average Token Payment (Last 24 hours)</Typography>
-                  </TableCell>
-                  <TableCell component="th" scope="row">
-                  {this.state.averagePaymentTokenLastDay}
-                  </TableCell>
-                </TableRow>
-                <TableRow>
-                  <TableCell component="th" scope="row">
-                    <Typography variant="h6">Average Wei Payment (Last 24 hours)</Typography>
-                  </TableCell>
-                  <TableCell component="th" scope="row">
-                  {this.state.averagePaymentWeiLastDay}
+                    {this.state.averagePaymentWei.formatted}
                   </TableCell>
                 </TableRow>
               </TableBody>
             </Table>
-        </CardContent>
-      </Card>
-      <Card className={classes.card}>
-      <CardContent>
-        <Typography variant="h5" style={{marginBotton:"5%"}}>Payment Search</Typography>
+          </CardContent>
+          <Button variant="contained" onClick={() => this._handleRefresh()}>
+            Refresh
+          </Button>
+        </Card>
+        <Card className={classes.card}>
           <div>
-            <TextField
-              id="outlined"
-              label="Payment ID"
-              value={this.state.idInput}
-              onChange={evt => this.handleChange(evt)}
-              margin="normal"
-              variant="outlined"
+            Past Week
+            <Switch
+              checked={this.state.checked}
+              onChange={() =>
+                this.setState(prevState => ({
+                  view: !prevState.view,
+                  checked: !prevState.checked
+                }))
+              }
+              value="checkedB"
+              color="primary"
             />
-            <Button variant="contained" onClick={() => this.searchById(this.state.idInput)}>Search</Button>
+            Past Day
           </div>
-          <div>
-            {this.state.paymentInfo ? (
-              <Typography variant="body1">{this.state.paymentInfo}</Typography>
-            ) : null}
-          </div>
-        </CardContent>
-      </Card>
-      <Card className={classes.card}>
-      <div style={{marginTop:"-20%"}}>
-
-       {PaymentFrequency}
-      </div>
-      </Card>
+          <Table>
+            <TableBody>
+              <TableRow>
+                <TableCell component="th" scope="row">
+                  <Typography variant="h6">Count</Typography>
+                </TableCell>
+                <TableCell component="th" scope="row">
+                  {this.state.view
+                    ? this.state.paymentsLastDay
+                    : this.state.paymentsLastWeek}
+                </TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell component="th" scope="row">
+                  <Typography variant="h6">
+                    Average Token Payment
+                  </Typography>
+                </TableCell>
+                <TableCell component="th" scope="row">
+                  {this.state.view
+                    ? this.state.averagePaymentTokenLastDay.formatted
+                    : this.state.averagePaymentTokenLastWeek.formatted}
+                </TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell component="th" scope="row">
+                  <Typography variant="h6">% Change from Previous</Typography>
+                </TableCell>
+                <TableCell component="th" scope="row">
+                  {this.state.view
+                    ? this.state.paymentsLastDayPct
+                    : this.state.paymentsLastWeekPct}
+                </TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+          <Button variant="contained" onClick={() => this._handleRefresh()}>
+            Refresh
+          </Button>
+        </Card>
+        <Card className={classes.card}>
+        <div>
+          Start Date:
+            <DatePicker
+              selected={this.state.startDate}
+              onSelect={(evt) => this.handleStartChange(evt)} //when day is clicked
+              onChange={(evt) => this.handleStartChange(evt)} //only when value has changed
+            />
+          End Date:
+            <DatePicker
+              selected={this.state.endDate}
+              onSelect={(evt) => this.handleEndChange(evt)} //when day is clicked
+              onChange={(evt) => this.handleEndChange(evt)} //only when value has changed
+            />
+          <Button variant="contained" onClick={() =>this.fetchDateRange()}>Submit</Button>
+        </div>
+          <Table>
+            <TableBody>
+              <TableRow>
+                <TableCell component="th" scope="row">
+                  <Typography variant="h6">Count</Typography>
+                </TableCell>
+                <TableCell component="th" scope="row">
+                  {this.state.paymentCountRange}
+                </TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell component="th" scope="row">
+                  <Typography variant="h6">
+                    Average Token Payment
+                  </Typography>
+                </TableCell>
+                <TableCell component="th" scope="row">
+                  {this.state.averagePaymentTokenRange.formatted}
+                </TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </Card>
+        <Card className={classes.card}>
+          <CardContent>
+            <Typography variant="h5" style={{ marginBotton: "5%" }}>
+              Payment Search
+            </Typography>
+            <div>
+              <TextField
+                id="outlined"
+                label="Purchase ID"
+                value={this.state.idInput}
+                onChange={evt => this.handleChange(evt)}
+                margin="normal"
+                variant="outlined"
+              />
+              <Button
+                variant="contained"
+                onClick={() => this.searchById(this.state.idInput)}
+              >
+                Search
+              </Button>
+            </div>
+            <div>
+              {this.state.paymentInfo ? (
+                <Typography component="div" variant="body1">
+                  {Object.entries(this.state.paymentInfo).map(([k,v], i) => {
+                    return (<div key={k}>
+                      {k + ': ' + JSON.stringify(v, null, 2)}
+                    </div>)
+                  })}
+                </Typography>
+              ) : null}
+            </div>
+          </CardContent>
+        </Card>
+        <Card className={classes.card}>
+          <div style={{ marginTop: "-20%" }}>{PaymentFrequency}</div>
+        </Card>
       </div>
     );
   }

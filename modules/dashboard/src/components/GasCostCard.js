@@ -5,12 +5,13 @@ import Card from "@material-ui/core/Card";
 import CardContent from "@material-ui/core/CardContent";
 import Typography from "@material-ui/core/Typography";
 import { withStyles } from "@material-ui/core/styles";
-import get from "../get";
+import Button from "@material-ui/core/Button";
 import Table from "@material-ui/core/Table";
 import TableBody from "@material-ui/core/TableBody";
 import TableCell from "@material-ui/core/TableCell";
 import TableHead from "@material-ui/core/TableHead";
 import TableRow from "@material-ui/core/TableRow";
+import axios from "axios";
 
 const styles = theme => ({
   card: {
@@ -38,37 +39,53 @@ class GasCostCard extends Component {
     };
   }
 
-  setGas = async () => {
-    const res = await get(`gasPrice/estimate`);
+  setGas = async (address) => {
+    const url = `${this.props.urls.api}/gascost/all/${address}`
+    const res = (await axios.get(url)).data || null
     if (res && res.sum) {
-      this.setState({ gasTotal: res.sum });
+      let gas = this.props.web3.utils.fromWei(res.sum);
+
+      this.setState({ gasTotal: gas });
     } else {
       this.setState({ gasTotal: 0 });
     }
   };
 
-  setGasLastWeek = async () => {
-    const res = await get(`gasPrice/trailingweek`);
+  setGasLastWeek = async (address) => {
+    const url = `${this.props.urls.api}/gascost/trailingweek/${address}`
+    const res = (await axios.get(url)).data || null
     if (res && res.sum) {
-      this.setState({ gasLastWeek: res.sum });
+      let gas = this.props.web3.utils.fromWei(res.sum);
+      this.setState({ gasLastWeek: gas });
     } else {
       this.setState({ gasLastWeek: 0 });
     }
   };
 
-  setGasLastDay = async () => {
-    const res = await get(`gasPrice/trailing24`);
+  setGasLastDay = async (address) => {
+    const url = `${this.props.urls.api}/gascost/trailing24/${address}`
+    const res = (await axios.get(url)).data || null
     if (res && res.sum) {
-      this.setState({ gasLastDay: res.sum });
+      let gas = this.props.web3.utils.fromWei(res.sum);
+
+      this.setState({ gasLastDay: gas });
     } else {
       this.setState({ gasLastDay: 0 });
     }
   };
 
+  _handleRefresh = async() =>{
+    const { hubWallet } = this.props;
+    await this.setGas(hubWallet.address);
+    await this.setGasLastDay(hubWallet.address);
+    await this.setGasLastWeek(hubWallet.address);
+  }
+
   componentDidMount = async () => {
-    await this.setGas();
-    await this.setGasLastDay();
-    await this.setGasLastWeek();
+    const { hubWallet } = this.props;
+    await this.setGas(hubWallet.address);
+    await this.setGasLastDay(hubWallet.address);
+    await this.setGasLastWeek(hubWallet.address);
   };
 
   render() {
@@ -82,7 +99,7 @@ class GasCostCard extends Component {
                 <TableRow>
                   <TableCell />
                   <TableCell>
-                    <Typography variant="h6"> Gas Paid by Hub</Typography>
+                    <Typography variant="h6"> Gas Paid by Hub (ETH)</Typography>
                   </TableCell>
                 </TableRow>
               </TableHead>
@@ -114,6 +131,9 @@ class GasCostCard extends Component {
               </TableBody>
             </Table>
           </CardContent>
+          <Button variant="contained" onClick={() =>this._handleRefresh()}>
+            Refresh
+          </Button>
         </Card>
       </div>
     );

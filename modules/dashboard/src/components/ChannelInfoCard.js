@@ -1,5 +1,5 @@
 import React, { Component } from "react";
-//import Button from "@material-ui/core/Button";
+import Button from "@material-ui/core/Button";
 import Card from "@material-ui/core/Card";
 //import CardActions from "@material-ui/core/CardActions";
 import CardContent from "@material-ui/core/CardContent";
@@ -8,10 +8,8 @@ import { withStyles } from "@material-ui/core/styles";
 import Table from '@material-ui/core/Table';
 import TableBody from '@material-ui/core/TableBody';
 import TableCell from '@material-ui/core/TableCell';
-import TableHead from '@material-ui/core/TableHead';
 import TableRow from '@material-ui/core/TableRow';
-import get from '../get';
-
+import axios from "axios";
 
 const styles = theme => ({
     card: {
@@ -29,13 +27,21 @@ class ChannelInfoCard extends Component{
     super(props)
     this.state={
       openChannels:null,
-      avgWeiBalance:null,
-      avgTokenBalance:null
+      unopenedChannels:null,
+      avgWeiBalance:{
+        raw:null,
+        formatted:null
+      },
+      avgTokenBalance:{
+        raw:null,
+        formatted:null
+      }
     }
   }
 
-  setChannels = async() => {
-    const res = await get(`channels/open`)
+  setOpenChannels = async() => {
+    const url = `${this.props.urls.api}/channels/open`
+    const res = (await axios.get(url)).data || null
     if (res) {
       this.setState({openChannels: res.count});
     } else {
@@ -43,18 +49,44 @@ class ChannelInfoCard extends Component{
     }
   }
 
-  setChannelBalances = async() => {
-    const res = await get(`channels/averages`)
+  setUnopenedChannels = async() => {
+    const url = `${this.props.urls.api}/channels/notopen/count`
+    const res = (await axios.get(url)).data || null
     if (res) {
-      this.setState({avgTokenBalance: res.avg_tokens, avgWeiBalance: res.avg_wei});
+      this.setState({unopenedChannels: res.count});
+    } else {
+      this.setState({unopenedChannels: 0});
+    }
+  }
+
+  setChannelBalances = async() => {
+    const { web3 } = this.props;
+    const url = `${this.props.urls.api}/channels/averages`
+    const res = (await axios.get(url)).data || null
+    if (res) {
+      let tokenDeposit = String(Math.trunc(res.avg_tokens));
+      let weiDeposit = String(Math.trunc(res.avg_wei));
+
+      console.log(`tokens: ${tokenDeposit}, wei: ${weiDeposit}`)
+      this.setState(state => {
+                    state.avgTokenBalance.raw = res.avg_tokens
+                    state.avgTokenBalance.formatted = web3.utils.fromWei(tokenDeposit)
+                    state.avgWeiBalance.raw = res.avg_wei
+                    state.avgWeiBalance.formatted = web3.utils.fromWei(weiDeposit)
+                    return state});
     } else {
       this.setState({avgTokenBalance: 0, avgWeiBalance: 0});
     }
   }
 
-  componentDidMount = async() =>{
-    await this.setChannels()
+  _handleRefresh = async() =>{
+    await this.setOpenChannels()
+    await this.setUnopenedChannels()
     await this.setChannelBalances()
+  }
+
+  componentDidMount = async() =>{
+    await this._handleRefresh()
   }
 
   render(){
@@ -83,11 +115,21 @@ class ChannelInfoCard extends Component{
               <TableRow >
                 <TableCell component="th" scope="row">
                   <Typography variant="h6">
+                  Non-open Channels
+                  </Typography>
+                </TableCell>
+                <TableCell component="th" scope="row">
+                  {this.state.unopenedChannels}
+                </TableCell>
+              </TableRow>
+              <TableRow >
+                <TableCell component="th" scope="row">
+                  <Typography variant="h6">
                   Average Channel Wei Balance
                   </Typography>
                 </TableCell>
                 <TableCell component="th" scope="row">
-                {this.state.avgWeiBalance}
+                {this.state.avgWeiBalance.formatted}
                 </TableCell>
               </TableRow>
               <TableRow >
@@ -97,16 +139,19 @@ class ChannelInfoCard extends Component{
                   </Typography>
                 </TableCell>
                 <TableCell component="th" scope="row">
-                {this.state.avgTokenBalance}
+                {this.state.avgTokenBalance.formatted}
                 </TableCell>
               </TableRow>
           </TableBody>
         </Table>
 
         </CardContent>
+        <Button variant="contained" onClick={() =>this._handleRefresh()}>
+            Refresh
+          </Button>
       </Card>
     );
   };
 }
-  
-  export const ChannelInfoCardStyled = withStyles(styles)(ChannelInfoCard);
+
+export const ChannelInfoCardStyled = withStyles(styles)(ChannelInfoCard);

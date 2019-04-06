@@ -1,7 +1,7 @@
 {
   "name": "connext",
   "description": "Shared code between wallet and hub",
-  "version": "3.0.13",
+  "version": "3.0.16",
   "main": "dist",
   "devDependencies": {
     "@types/chai": "^4.1.6",
@@ -40,7 +40,7 @@
     "semaphore": "^1.1.0",
     "typescript-fsa": "^3.0.0-beta-2",
     "typescript-fsa-reducers": "^1.1.0",
-    "web3": "=1.0.0-beta.36"
+    "web3": "=1.0.0-beta.37"
   },
   "engines": {
     "node": ">=9",

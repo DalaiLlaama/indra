@@ -39,12 +39,12 @@ log_finish=@echo "[Makefile] => Finished building $@ in $$((`date "+%s"` - `cat 
 
 ########################################
 # Begin Phony Rules
-.PHONY: default all dev prod stop clean deep-clean reset purge push push-live backup
+.PHONY: default all dev prod stop clean reset purge push push-live backup
 
 default: dev
 all: dev prod
-dev: database hub proxy client dashboard
-prod: database-prod hub-prod proxy-prod dashboard-server-prod
+dev: hooks database hub proxy client dashboard
+prod: hooks database-prod hub-prod proxy-prod dashboard-server-prod
 
 start: dev
 	bash ops/deploy.dev.sh
@@ -58,20 +58,38 @@ stop:
 clean: stop
 	docker container prune -f
 	rm -rf build/*
+	rm -rf modules/**/build
+	rm -rf modules/**/dist
 
-deep-clean: clean
-	rm -rf $(cwd)/modules/**/build
-	rm -rf $(cwd)/modules/**/dist
-
-reset: stop
+reset-base: stop
 	docker container prune -f
 	docker volume rm $(project)_database_dev 2> /dev/null || true
-	docker volume rm $(project)_chain_dev 2> /dev/null || true
-	docker volume rm `docker volume ls -q | grep "[0-9a-f]\{64\}" | tr '\n' ' '` 2> /dev/null || true
-	rm -f $(db)/snapshots/ganache-*
 
-purge: reset deep-clean
-	rm -rf $(cwd)/modules/**/node_modules
+reset-client: reset-base
+	rm -rf build/client*  $(client)/dist $(client)/node_modules
+
+reset-contracts: reset-base
+	rm -rf build/contract* $(contracts)/build/* $(contracts)/node_modules
+	docker volume rm $(project)_chain_dev 2> /dev/null || true
+
+reset-dashboard: reset-base
+	rm -rf build/dashboard* $(dashboard)/build/* $(dashboard)/node_modules
+	docker volume rm $(project)_chain_dev 2> /dev/null || true
+
+reset-database: reset-base
+	rm -rf build/database* $(db)/build/* $(db)/node_modules
+	docker volume rm $(project)_database_dev 2> /dev/null || true
+
+reset-hub: reset-base
+	rm -rf build/hub* $(hub)/dist/* $(hub)/node_modules
+
+reset: reset-base
+	docker volume rm $(project)_chain_dev 2> /dev/null || true
+	docker volume rm $(project)_database_dev 2> /dev/null || true
+	rm -rf $(db)/snapshots/ganache-*
+
+purge: reset clean
+	rm -rf modules/**/node_modules
 
 push: prod
 	docker tag $(project)_database:latest $(registry)/$(project)_database:latest
@@ -147,6 +165,7 @@ dashboard-prod: dashboard-node-modules $(shell find $(dashboard)/src $(dashboard
 	$(log_start)
 	$(docker_run_in_dashboard) "cp -f ops/prod.env .env"
 	$(docker_run_in_dashboard) "npm run build"
+	$(docker_run_in_dashboard) "cp -f ops/dev.env .env"
 	$(log_finish) && touch build/$@
 
 dashboard: dashboard-node-modules $(dashboard)/ops/dev.env
@@ -217,12 +236,12 @@ database-prod: database
 	docker tag $(project)_database:dev $(project)_database:latest
 	$(log_finish) && touch build/$@
 
-database: database-node-modules migration-templates $(shell find $(db)/ops $(find_options))
+database: database-node-modules database-migrations $(shell find $(db)/ops $(find_options))
 	$(log_start)
 	docker build --file $(db)/ops/db.dockerfile --tag $(project)_database:dev $(db)
 	$(log_finish) && touch build/$@
 
-migration-templates: $(db)/ops/ejs-render.js $(shell find $(db)/migrations $(db)/templates $(find_options))
+database-migrations: $(db)/ops/ejs-render.js $(shell find $(db)/migrations $(db)/templates $(find_options))
 	$(log_start)
 	$(docker_run_in_db) "make"
 	$(log_finish) && touch build/$@
@@ -242,4 +261,11 @@ builder: ops/builder.dockerfile
 root-node-modules: package.json
 	$(log_start)
 	$(install)
+	$(log_finish) && touch build/$@
+
+hooks: ops/pre-push.sh
+	$(log_start)
+	rm -f .git/hooks/*
+	cp ops/pre-push.sh .git/hooks/pre-push
+	chmod +x .git/hooks/pre-push
 	$(log_finish) && touch build/$@

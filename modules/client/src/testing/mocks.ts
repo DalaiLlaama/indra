@@ -58,6 +58,8 @@ export class MockConnextInternal extends ConnextInternal {
       ...opts,
     } as any)
 
+    this.auth = async () => { return null }
+
     this.mockContract = this.contract as MockChannelManager
     this.mockHub = this.hub as MockHub
 
@@ -189,6 +191,24 @@ export class MockHub implements IHubAPIClient {
     return {} as any
   }
 
+  async authChallenge(): Promise<string> {
+    return 'nonce'
+  }
+  async authResponse(nonce: string, address: string, origin: string, signature: string): Promise<string> {
+    return 'hub-token-returned'
+  }
+  async getAuthStatus(): Promise<{ success: boolean, address?: Address }> {
+    return { success: true, address: mkAddress('0xUUU') }
+  }
+  
+  async getChannelByUser(recipient: string): Promise<ChannelRow> {
+    return { id: 0, state: getChannelState('full', { user: recipient }), status: 'CS_OPEN' }
+  }
+
+  async recipientNeedsCollateral(): Promise<string | null> {
+    return null
+  }
+
   async redeem(secret: string): Promise<PurchasePaymentHubResponse & { amount: Payment }> {
     // NOTE: by default assumes this is redeemers first payment
     // if this is not what you are testing against, must use
@@ -268,7 +288,7 @@ export class MockHub implements IHubAPIClient {
         console.log("TEST INCLUSION")
         this.receivedUpdateRequests.push(p.update as UpdateRequest)
       }
-      if (p.type == 'PT_CHANNEL' || 'PT_LINK') {
+      if (p.type == 'PT_CHANNEL' || p.type == 'PT_LINK' || p.type == 'PT_CUSTODIAL') {
         return {
           type: 'channel',
           update: {
