@@ -1,5 +1,4 @@
 import { assertUnreachable } from '../lib/utils'
-import { Block } from 'web3/eth/types'
 import { UpdateRequest, ChannelState, InvalidationArgs, Sync, ThreadStateUpdate, ArgsTypes, channelUpdateToUpdateRequest } from '../types'
 import { ChannelStateUpdate, SyncResult, InvalidationReason } from '../types'
 import { Poller } from '../lib/poller/Poller'
@@ -11,8 +10,9 @@ import * as actions from '../state/actions'
 import { maybe } from '../lib/utils'
 import Semaphore = require('semaphore')
 import { getChannel } from '../lib/getChannel';
-import { EventLog } from 'web3/types'
 import { hasPendingOps } from '../hasPendingOps'
+import { Block } from 'web3-eth';
+import { EventLog } from 'web3-core';
 
 /**
  * This function should be used to update the `syncResultsFromHub` value in the 
@@ -590,7 +590,8 @@ export default class SyncController extends AbstractController {
    * the channel status.
   */
  public handleHubSync(sync: Sync) {
-    if (this.store.getState().runtime.channelStatus !== sync.status) {
+   const state = this.store.getState()
+    if (state.runtime.channelStatus !== sync.status) {
       this.store.dispatch(actions.setChannelStatus(sync.status))
     }   
      
@@ -603,6 +604,8 @@ export default class SyncController extends AbstractController {
       case "CS_OPEN":
         break
       case "CS_CHANNEL_DISPUTE":
+      case "CS_CHAINSAW_ERROR":
+        console.warn(`Channel error with hub (status: ${sync.status}), please contact admin. Channel: ${JSON.stringify(state.persistent.channel, null, 2)}`)
         break
       case "CS_THREAD_DISPUTE":
         throw new Error('THIS IS BAD. Channel is set to thread dispute state, before threads are enabled. See See REB-36. Disabling client.')

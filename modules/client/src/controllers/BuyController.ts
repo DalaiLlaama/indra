@@ -69,6 +69,7 @@ export default class BuyController extends AbstractController {
           // PUNT on this -- AB
           break
         case 'PT_CHANNEL':
+        case 'PT_CUSTODIAL':
           const chanArgs: PaymentArgs = {
             recipient: 'hub',
             ...payment.amount
@@ -82,7 +83,7 @@ export default class BuyController extends AbstractController {
 
           signedPayments.push({
             ...payment,
-            type: 'PT_CHANNEL',
+            type: payment.type as any,
             update: {
               reason: 'Payment',
               args: chanArgs,
@@ -100,8 +101,13 @@ export default class BuyController extends AbstractController {
           //    where the user posts to a separate endpoint (not buy)
 
           // check that a secret exists
-          if (!payment.secret) {
+          const { secret } = payment.meta
+          if (!secret) {
             throw new Error(`Secret is not present on linked payment, aborting purchase. Purchase: ${JSON.stringify(purchase, null, 2)}`)
+          }
+
+          if (!this.connext.opts.web3.utils.isHex(secret)) {
+            throw new Error(`Secret is not hex string, aborting purchase. Purchase: ${JSON.stringify(purchase, null, 2)}`)
           }
 
           const linkArgs: PaymentArgs = {

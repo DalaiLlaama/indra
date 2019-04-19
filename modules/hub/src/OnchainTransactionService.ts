@@ -1,24 +1,18 @@
 import { assertUnreachable } from "./util/assertUnreachable";
 import { OnchainTransactionsDao, TxnStateUpdate } from "./dao/OnchainTransactionsDao";
-import { TransactionRequest, OnchainTransactionRow } from "./domain/OnchainTransaction";
+import { TransactionRequest, OnchainTransactionRow, RawTransaction } from "./domain/OnchainTransaction";
 import * as crypto from 'crypto'
 import log from './util/log'
 import { default as DBEngine, SQL } from "./DBEngine";
 import { default as GasEstimateDao } from "./dao/GasEstimateDao";
-import { sleep, synchronized, maybe, Lock, Omit, prettySafeJson } from "./util";
+import { sleep, synchronized, maybe, Lock, Omit, prettySafeJson, safeJson } from "./util";
 import { Container } from "./Container";
 import { SignerService } from "./SignerService";
+import { serializeTxn } from "./util/ethTransaction";
+import Web3 from "web3";
+import w3utils = require('web3-utils')
 
 const LOG = log('OnchainTransactionService')
-
-function md5(data: string) {
-  if (!data && data !== '')
-    return `<empty: ${data}>`
-  const hash = crypto.createHash('md5')
-  hash.update(data)
-  return hash.digest('hex')
-}
-
 
 /**
  * Service for submitting and monitoring the state of onchain transactions.
@@ -66,7 +60,7 @@ function md5(data: string) {
  *
  *      class MyService {
  *        async completionCallback(txn: OnchainTransactionRow) {
- *          console.log('Transaction completed:', txn)
+ *          LOG.info('Transaction completed:', txn)
  *        }
  *      }
  *
@@ -80,7 +74,7 @@ export class OnchainTransactionService {
   running: boolean = false
 
   constructor(
-    private web3: any, 
+    private web3: Web3, 
     private gasEstimateDao: GasEstimateDao, 
     private onchainTransactionDao: OnchainTransactionsDao, 
     private db: DBEngine,
@@ -121,11 +115,14 @@ export class OnchainTransactionService {
     const nonce = Math.max(
       await this.web3.eth.getTransactionCount(txnRequest.from),
       (await db.queryOne(SQL`
-        select coalesce(max(nonce), 0) + 1 as nonce
-        from onchain_transactions_raw
-        where
-          "from" = ${txnRequest.from} and
-          state <> 'failed'
+        select coalesce((
+          select nonce from onchain_transactions_raw 
+          where
+            "from" = ${txnRequest.from} and
+            state <> 'failed'
+          order by nonce desc 
+          limit 1
+        ), 0) + 1 as nonce
       `)).nonce,
     )
 
@@ -133,16 +130,16 @@ export class OnchainTransactionService {
     if (!gasPrice)
       throw new Error('gasEstimateDao.latest() returned null')
 
-    const gasAmount = this.web3.utils.hexToNumber(
+    const gasAmount = w3utils.hexToNumber(
       txnRequest.gas ||
       await this.web3.eth.estimateGas({ ...web3TxRequest })
     )
 
-    const unsignedTx = {
+    const unsignedTx: RawTransaction = {
       from: txnRequest.from,
       to: txnRequest.to,
       value: txnRequest.value || '0',
-      gasPrice: this.web3.utils.toWei('' + gasPrice.fast, 'gwei'),
+      gasPrice: w3utils.toWei('' + gasPrice.fast, 'gwei'),
       gas: gasAmount,
       data: txnRequest.data || '0x',
       nonce: nonce,
@@ -150,27 +147,10 @@ export class OnchainTransactionService {
 
     LOG.info(`Unsigned transaction to send: ${JSON.stringify(unsignedTx)}`)
 
-    /* TODO: REB-61
-    const sig = await this.signerService.signTransaction({ ...unsignedTx });
-    const tx = {
-      ...unsignedTx,
-      hash: sig.tx.hash,
-      signature: {
-        r: sig.tx.r,
-        s: sig.tx.s,
-        v: this.web3.utils.hexToNumber(sig.tx.v),
-      }
-    }
-    */
-
-    const tx = {
-      ...unsignedTx,
-      hash: null,
-      signature: null,
-    }
+    const signedTx = await this.signerService.signTransaction(unsignedTx)
 
     // Note: this is called from within the transactional context of the caller
-    const txnRow = await this.onchainTransactionDao.insertTransaction(db, logicalId, meta, tx)
+    const txnRow = await this.onchainTransactionDao.insertTransaction(db, logicalId, meta, signedTx)
     await db.onTransactionCommit(() => this.poll())
 
     return txnRow
@@ -182,13 +162,13 @@ export class OnchainTransactionService {
   }
 
   @synchronized('stopped')
-  async runPoller(pollInterval?: number) {
+  async runPoller(pollInterval: number = 1000) {
     this.running = true
     while (this.running) {
       try {
         await this.poll()
         if (this.running)
-          await sleep(pollInterval = 1000)
+          await sleep(pollInterval)
       } catch (e) {
         LOG.error(`Error polling pending transactions (will retry in 30s): ${'' + e}\n${e.stack}`)
         if (this.running)
@@ -208,96 +188,102 @@ export class OnchainTransactionService {
 
   @synchronized('pollFinished')
   async poll() {
-    for (const txn of await this.onchainTransactionDao.getPending(this.db))
+    for (const txn of await this.onchainTransactionDao.getPending(this.db)) {
       await this.processPendingTxn(txn)
+    }
+  }
+
+  /**
+   * 
+   * Internal function to send the signed transaction to chain and handle the possible
+   * error response.
+   */
+  private async submitToChain(txn: OnchainTransactionRow): Promise<void> {
+    const error = await new Promise<string | null>(res => {
+      LOG.info(`Submitting transaction nonce=${txn.nonce} hash=${txn.hash}: ${prettySafeJson(txn)}...`)
+      
+      const tx = this.web3.eth.sendSignedTransaction(serializeTxn(txn))
+      tx.on('transactionHash', () => res(null))
+      tx.on('error', err => res('' + err))
+    })
+
+    const errorReason = this.getErrorReason(error)
+    LOG.info('Transaction nonce={txn.nonce} hash={hash} sent: {txn.hash}: {res}', {
+      txn,
+      hash: txn.hash,
+      res: error ? '' + error + ` (${errorReason})`: 'ok!',
+    })
+
+    if (!error || errorReason == 'already-imported') {
+      await this.updateTxState(txn, {
+        state: 'submitted',
+      })
+      return
+    }
+
+    switch (errorReason) {
+      case 'permanent':
+        // In the future we'll be able to be more intelligent about retrying (ex,
+        // with a new nonce or more gas) here... but for now, just fail.
+        LOG.error(`Permanent error sending transaction: ${error}. Transaction: ${prettySafeJson(txn)}, marking as pending_failure`)
+        await this.updateTxState(txn, {
+          state: 'pending_failure',
+          reason: errorReason
+        })
+        break
+
+      case 'temporary':
+        // If the error is temporary (ex, network error), do nothing; this txn
+        // will be retried on the next loop.
+        LOG.warning(`Temporary error while submitting tx '${txn.hash}': ${'' + error} (will retry)`)
+        break
+
+      case 'unknown':
+        LOG.error(
+          `Unknown error sending transaction! Refusing to do anything until ` +
+          `this error is added to 'OnchainTransactionService.knownTxnErrorMessages': ` +
+          `${error}`
+        )
+        break
+
+      default:
+        assertUnreachable(errorReason, 'unexpected error reason: ' + errorReason)
+    }
   }
 
   private async processPendingTxn(txn: OnchainTransactionRow): Promise<void> {
+    LOG.info(`processPendingTxn(${txn.hash}) state: ${txn.state}`)
     if (txn.state == 'new') {
-      // Use the data hash to simplify tracking in logs until we're able to
-      // calculate the actual hash
-      const dataHash = md5(txn.data)
-      const signedTx = await this.signerService.signTransaction(txn)
-      LOG.info(`signedTx: ${prettySafeJson(signedTx)}`)
-      const error = await new Promise<string | null>(res => {
-        // const tx = this.web3.eth.sendSignedTransaction(serializeTxn(txn)) TODO: REB-61
-        LOG.info(`Submitting transaction nonce=${txn.nonce} data-hash=${dataHash}: ${prettySafeJson(txn)}...`)
-        const tx = this.web3.eth.sendSignedTransaction(signedTx)
-        tx.on('transactionHash', hash => {
-          // TODO: REB-61
-          this.db.query(SQL`
-            UPDATE onchain_transactions_raw
-            SET hash = ${hash}
-            WHERE id = ${txn.id}
-          `)
-          txn.hash = hash
-          res(null)
-        })
-        tx.on('error', err => res('' + err))
-      })
-
-      const errorReason = this.getErrorReason(error)
-      LOG.info('Transaction nonce={txn.nonce} data-hash={dataHash} sent: {txn.hash}: {res}', {
-        txn,
-        dataHash,
-        res: error ? '' + error + ` (${errorReason})`: 'ok!',
-      })
-
-      if (!error || errorReason == 'already-imported') {
-        await this.updateTxState(txn, {
-          state: 'submitted',
-        })
-        return
-      }
-
-      switch (errorReason) {
-        case 'permanent':
-          // In the future we'll be able to be more intelligent about retrying (ex,
-          // with a new nonce or more gas) here... but for now, just fail.
-          LOG.error(`Permanent error sending transaction: ${error}. Transaction: ${JSON.stringify(txn)}`)
-          await this.updateTxState(txn, {
-            state: 'failed',
-            reason: '' + error,
-          })
-          break
-
-        case 'temporary':
-          // If the error is temporary (ex, network error), do nothing; this txn
-          // will be retried on the next loop.
-          LOG.warning(`Temporary error while submitting tx '${txn.hash}': ${'' + error} (will retry)`)
-          break
-
-        case 'unknown':
-          LOG.error(
-            `Unknown error sending transaction! Refusing to do anything until ` +
-            `this error is added to 'OnchainTransactionService.knownTxnErrorMessages': ` +
-            `${error}`
-          )
-          break
-
-        default:
-          assertUnreachable(errorReason, 'unexpected error reason: ' + errorReason)
-      }
-
+      await this.submitToChain(txn)
       return
     }
 
     if (txn.state == 'submitted') {
-      const [tx, err] = await maybe(this.web3.eth.getTransactionReceipt(txn.hash))
-      LOG.info('State of {txn.hash}: {res}', {
-        txn,
-        res: JSON.stringify(tx || err),
-      })
+      const [tx, err] = await maybe(this.web3.eth.getTransaction(txn.hash))
       if (err) {
         // TODO: what errors can happen here?
         LOG.warning(`Error checking status of tx '${txn.hash}': ${'' + err} (will retry)`)
         return
       }
 
-      if (!tx || !tx.blockNumber) {
-        const txnAgeS = (Date.now() - (+new Date(txn.submittedOn))) / 1000
-        const txnAge = `${Math.floor(txnAgeS / 60)}m ${Math.floor(txnAgeS % 60)}s`
+      const txnAgeS = (Date.now() - (+new Date(txn.submittedOn))) / 1000
+      const txnAge = `${Math.floor(txnAgeS / 60)}m ${Math.floor(txnAgeS % 60)}s`
 
+      // not in mempool yet
+      if (!tx) {
+        // resubmit after 10 seconds of waiting
+        if (txnAgeS > 10) {
+          // should reset the submit time
+          await this.submitToChain(txn)
+        }
+        // retry on next poll
+        return
+      }
+
+      // in mempool
+      if (!tx.blockNumber) {
+        // fail after a long time in mempool
+        //
         // Strictly speaking, this is not 100% safe. In reality we should
         // also be checking to see if there's another confirmed transaction
         // with an equal or higher nonce too... but this is probably safe for
@@ -315,14 +301,71 @@ export class OnchainTransactionService {
         return
       }
 
+      // has block
+      const [txReceipt, errReceipt] = await maybe(this.web3.eth.getTransactionReceipt(txn.hash))
+      if (errReceipt) {
+        // TODO: what errors can happen here?
+        LOG.warning(`Error checking status of tx '${txn.hash}': ${'' + errReceipt} (will retry)`)
+        return
+      }
+      if (!txReceipt) {
+        return
+      }
+
+      // otherwise we have both tx and blockNumber, so we can put a final state
       await this.updateTxState(txn, {
-        state: tx.status ? 'confirmed' : 'failed',
-        blockNum: tx.blockNumber,
-        blockHash: tx.blockHash,
-        transactionIndex: tx.transactionIndex,
-        reason: tx.status ? null : 'EVM revert',
+        state: txReceipt.status ? 'confirmed' : 'failed',
+        blockNum: txReceipt.blockNumber,
+        blockHash: txReceipt.blockHash,
+        transactionIndex: txReceipt.transactionIndex,
+        reason: txReceipt.status ? null : 'EVM revert',
       })
 
+      return
+    }
+
+    if (txn.state == 'pending_failure') {
+      const [tx, err] = await maybe(this.web3.eth.getTransaction(txn.hash))
+      if (err) {
+        // TODO: what errors can happen here?
+        LOG.warning(`Error checking status of tx '${txn.hash}': ${'' + err} (will retry)`)
+        return
+      }
+
+      if (tx) {
+        // if tx exists at this point, mark as submitted
+        await this.updateTxState(txn, {
+          state: 'submitted',
+        })
+        return
+      } else {
+        // if it doesn't exist, it's not in the mempool, resubmit
+        await this.submitToChain(txn)
+      }
+
+      // get age to compare poll times
+      const txnAgeS = (Date.now() - (+new Date(txn.pendingFailureOn))) / 1000
+      const txnAge = `${Math.floor(txnAgeS / 60)}m ${Math.floor(txnAgeS % 60)}s`
+
+      const latestConfirmed = await this.onchainTransactionDao.getLatestConfirmed(this.db, txn.from)
+      if (latestConfirmed && latestConfirmed.nonce > txn.nonce) {
+        LOG.warning(`Transaction '${txn.hash}' is invalidated by a higher confirmed nonce: ${latestConfirmed.nonce}; marking as failed.`)
+        await this.updateTxState(txn, {
+          state: 'failed',
+          reason: `higher confirmed nonce by txn id: ${txn.id}`,
+        })
+        return
+      }
+
+      // if polled for 54 seconds and still nothing, mark as failed
+      if (txnAgeS > 6 * 9) {
+        LOG.warning(`Transaction '${txn.hash}' has been pending_failure for ${txnAge}; marking failed.`)
+        await this.updateTxState(txn, {
+          state: 'failed',
+          reason: `timeout (${txnAge})`,
+        })
+        return
+      }
       return
     }
 
@@ -373,9 +416,12 @@ export class OnchainTransactionService {
     'known transaction:': 'already-imported',
     'same hash was already imported': 'already-imported',
     'nonce too low': 'permanent',
+    'nonce is too low': 'permanent',
     'replacement transaction underpriced': 'permanent',
     'does not have enough funds': 'permanent',
     'Invalid JSON RPC response:': 'temporary',
+    'insufficient funds for gas * price + value': 'permanent',
+    'another transaction with same nonce in the queue': 'permanent'
   }
 
   getErrorReason(errMsg: string): null | 'already-imported' | 'permanent' | 'temporary' | 'unknown' {

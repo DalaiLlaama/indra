@@ -10,7 +10,6 @@ import CssBaseline from "@material-ui/core/CssBaseline";
 import Drawer from "@material-ui/core/Drawer";
 import AppBar from "@material-ui/core/AppBar";
 import Toolbar from "@material-ui/core/Toolbar";
-import List from "@material-ui/core/List";
 import Typography from "@material-ui/core/Typography";
 import Divider from "@material-ui/core/Divider";
 import IconButton from "@material-ui/core/IconButton";
@@ -19,20 +18,19 @@ import MenuIcon from "@material-ui/icons/Menu";
 import ChevronLeftIcon from "@material-ui/icons/ChevronLeft";
 import ChevronRightIcon from "@material-ui/icons/ChevronRight";
 //import NotificationsIcon from "@material-ui/icons/Notifications";
-import { mainListItems } from "./listItems";
+import { SidebarLinks } from "./SidebarLinks";
 import { DepositsStyled } from "./Deposits";
 import { WithdrawalsStyled } from "./Withdrawals";
 import { UserInfoStyled } from "./UserInfo";
 import { GasCostCardStyled } from "./GasCostCard";
-const ChannelManagerAbi = require("../abi/ChannelManager.json");
-const TokenAbi = require("../abi/Token.json");
+import { CollateralCardStyled } from "./Collateralization";
 
 const drawerWidth = 240;
 
 const styles = theme => ({
   root: {
     display: "flex",
-    marginTop:"-10%"
+    marginTop: "-10%"
   },
   toolbar: {
     paddingRight: 24 // keep right padding when drawer closed
@@ -100,9 +98,9 @@ const styles = theme => ({
   h5: {
     marginBottom: theme.spacing.unit * 2
   },
-  routeWrapper:{
-    marginTop:"5%",
-    minWidth:"75%"
+  routeWrapper: {
+    marginTop: "5%",
+    minWidth: "75%"
   },
   title: {
     fontSize: 14
@@ -111,38 +109,14 @@ const styles = theme => ({
 
 class Dashboard extends React.Component {
   constructor(props) {
-    super(props)
+    super(props);
     this.state = {
-      hubUrl: this.props.hubUrl,
       open: false,
-      channelManager: {
-        address: '0x',
-        wei: {
-          raw: 0,
-          formatted: 0
-        },
-        token: {
-          raw: 0,
-          formatted: 0
-        },
-      },
-      hubWallet: {
-        address: '0x',
-        wei: {
-          raw: 0,
-          formatted: 0
-        },
-        token: {
-          raw: 0,
-          formatted: 0
-        },
-      },
-      loadingWallet: false,
-      loadingContract: false
+      channelManager: this.props.channelManager,
+      hubWallet: this.props.hubWallet
     };
   }
 
-  
   handleDrawerOpen = () => {
     this.setState({ open: true });
   };
@@ -153,96 +127,155 @@ class Dashboard extends React.Component {
 
   toggleDrawer = () => {
     this.setState({ open: !this.state.open });
-  }
+  };
 
   render() {
-    const { web3, hubUrl, apiUrl, classes } = this.props;
-    const { loadingWallet, loadingContract, open } = this.state;
+    const { web3, urls, classes } = this.props;
+    const {
+      open,
+      channelManager,
+      hubWallet
+    } = this.state;
 
     return (
-      
       <Router>
         <Paper elevation={1}>
-        <div className={classes.root}>
-        <CssBaseline />
-        <AppBar position="absolute" className={classNames(classes.appBar, this.state.open && classes.appBarShift)}>
-          <Toolbar disableGutters={!this.state.open} className={classes.toolbar}>
-            <IconButton
-              color="inherit"
-              aria-label="Open drawer"
-              onClick={this.handleDrawerOpen}
-              className={classNames(classes.menuButton, this.state.open && classes.menuButtonHidden)}
-            >
-              <MenuIcon />
-            </IconButton>
-            <Typography component="h1" variant="h6" color="inherit" noWrap className={classes.title}>
-              DaiCard.io Admin Dashboard
-            </Typography>
-          </Toolbar>
-        </AppBar>
-        <Drawer
-          variant="permanent"
-          classes={{
-            paper: classNames(classes.drawerPaper, !this.state.open && classes.drawerPaperClose)
-          }}
-          open={this.state.open}
-        >
-          <div className={classes.toolbarIcon}>
-            <IconButton onClick={this.toggleDrawer}>
-              {open ? <ChevronLeftIcon /> : <ChevronRightIcon />}
-            </IconButton>
-          </div>
-          <Divider />
-          <List>{mainListItems}</List>
-        </Drawer>
-        <div className={classes.routeWrapper}>
-        <Route
-              exact
-              path="/"
-              render={props => (
-                <Home web3={web3} hubUrl={hubUrl} apiUrl={apiUrl}/>
+          <div className={classes.root}>
+            <CssBaseline />
+            <AppBar
+              position="absolute"
+              className={classNames(
+                classes.appBar,
+                this.state.open && classes.appBarShift
               )}
-            />
-      <Route
-        exact
-        path="/payments"
-        render={props => (
-          <PaymentInfoCardStyled web3={web3} hubUrl={hubUrl} apiUrl={apiUrl}/>
-        )}
-      />
-      <Route
-        exact
-        path="/deposits"
-        render={props => (
-          <DepositsStyled web3={web3} hubUrl={hubUrl} apiUrl={apiUrl}/>
-        )}
-      />
-      <Route
-        exact
-        path="/withdrawals"
-        render={props => (
-          <WithdrawalsStyled web3={web3} hubUrl={hubUrl} apiUrl={apiUrl}/>
-        )}
-      />
-      <Route
-        exact
-        path="/users"
-        render={props => (
-          <UserInfoStyled web3={web3} hubUrl={hubUrl} apiUrl={apiUrl}/>
-        )}
-      />
-      <Route
-        exact
-        path="/gas"
-        render={props => (
-          <GasCostCardStyled web3={web3} hubUrl={hubUrl} apiUrl={apiUrl}/>
-        )}
-      />
-      </div>
+            >
+              <Toolbar
+                disableGutters={!this.state.open}
+                className={classes.toolbar}
+              >
+                <IconButton
+                  color="inherit"
+                  aria-label="Open drawer"
+                  onClick={this.handleDrawerOpen}
+                  className={classNames(
+                    classes.menuButton,
+                    this.state.open && classes.menuButtonHidden
+                  )}
+                >
+                  <MenuIcon />
+                </IconButton>
+                <Typography
+                  component="h1"
+                  variant="h6"
+                  color="inherit"
+                  noWrap
+                  className={classes.title}
+                >
+                  DaiCard.io Admin Dashboard
+                </Typography>
+              </Toolbar>
+            </AppBar>
+            <Drawer
+              variant="permanent"
+              classes={{
+                paper: classNames(
+                  classes.drawerPaper,
+                  !this.state.open && classes.drawerPaperClose
+                )
+              }}
+              open={this.state.open}
+            >
+              <div className={classes.toolbarIcon}>
+                <IconButton onClick={this.toggleDrawer}>
+                  {open ? <ChevronLeftIcon /> : <ChevronRightIcon />}
+                </IconButton>
+              </div>
+              <Divider />
+              <SidebarLinks urls={urls} />
+            </Drawer>
+            <div className={classes.routeWrapper}>
+              <Route
+                exact
+                path={`${urls.prefix}/`}
+                render={props => (
+                  <Home
+                    getContractInfo={this.props.getContractInfo}
+                    getWalletInfo={this.props.getWalletInfo}
+                    hubWallet={hubWallet}
+                    channelManager={channelManager}
+                    web3={web3}
+                    urls={urls}
+                  />
+                )}
+              />
+              <Route
+                exact
+                path={`${urls.prefix}/payments`}
+                render={props => (
+                  <PaymentInfoCardStyled
+                    web3={web3}
+                    urls={urls}
+                  />
+                )}
+              />
+              <Route
+                exact
+                path={`${urls.prefix}/deposits`}
+                render={props => (
+                  <DepositsStyled
+                    web3={web3}
+                    urls={urls}
+                  />
+                )}
+              />
+              <Route
+                exact
+                path={`${urls.prefix}/withdrawals`}
+                render={props => (
+                  <WithdrawalsStyled
+                    web3={web3}
+                    urls={urls}
+                  />
+                )}
+              />
+              <Route
+                exact
+                path={`${urls.prefix}/users`}
+                render={props => (
+                  <UserInfoStyled
+                    web3={web3}
+                    urls={urls}
+                  />
+                )}
+              />
+              <Route
+                exact
+                path={`${urls.prefix}/gas`}
+                render={props => (
+                  <GasCostCardStyled
+                    hubWallet={hubWallet}
+                    channelManager={channelManager}
+                    web3={web3}
+                    urls={urls}
+                  />
+                )}
+              />
+              <Route
+                exact
+                path={`${urls.prefix}/collateral`}
+                render={props => (
+                  <CollateralCardStyled
+                    hubWallet={hubWallet}
+                    channelManager={channelManager}
+                    web3={web3}
+                    urls={urls}
+                  />
+                )}
+              />
             </div>
-      </Paper>
+          </div>
+        </Paper>
       </Router>
-
     );
   }
 }

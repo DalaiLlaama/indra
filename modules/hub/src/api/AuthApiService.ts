@@ -13,6 +13,7 @@ export default class AuthApiService extends ApiService<AuthApiServiceHandler> {
   routes = {
     'POST /challenge': 'doChallenge',
     'POST /response': 'doResponse',
+    'POST /status': 'doStatus',
     'GET /status': 'doStatus',
   }
   handler = AuthApiServiceHandler
@@ -31,7 +32,7 @@ class AuthApiServiceHandler {
   async doChallenge(req: express.Request, res: express.Response) {
     const nonce = await this.crManager.generateNonce()
 
-    LOG.info(`Sending challenge nonce.`)
+    LOG.debug(`Sending challenge nonce.`)
 
     res.send({
       nonce,

@@ -28,17 +28,14 @@ const requestLogMiddleware = (req: any, res: any, next: any): any => {
   res.on('finish', () => {
     const remoteAddr = req.ip || req.headers['x-forwarded-for'] || req.address
     let duration = Date.now() - req._startTime
-    requestLog.info('{remoteAddr} {method} {url} -> {statusCode} ({size} bytes; {duration})', {
+    requestLog.info('{remoteAddr} {method} {url} {inSize} -> {statusCode} ({outSize}; {duration})', {
       remoteAddr,
       method: req.method,
       url: req.originalUrl,
       statusCode: res.statusCode,
-      size: res.get('content-length') || '?',
-      query: req.query,
-      host: req.hostname,
-      reqHeaders: req.headers,
-      resHeaders: res.getHeaders(),
-      duration: (duration / 1000).toFixed(3),
+      inSize: (req.get('content-length') || '0') + ' bytes',
+      outSize: (res.get('content-length') || '?') + ' bytes',
+      duration: (duration / 1000).toFixed(3) + 'ms',
     })
   })
   next()
@@ -64,7 +61,7 @@ function bodyTextMiddleware(opts: { maxSize: number }) {
           `bodyTextMiddleware: body too large (${size} > ${opts.maxSize}); not parsing.` :
           `bodyTextMiddleware: no content-length; not parsing body.`
       )
-      LOG.info(msg)
+      LOG.debug(msg)
       const rej = maybe.reject(new Error(msg))
       rawPromise.resolve(rej as any)
       textPromise.resolve(rej as any)
@@ -74,7 +71,7 @@ function bodyTextMiddleware(opts: { maxSize: number }) {
     const rawData = Buffer.alloc(size)
     let offset = 0
     req.on('data', (chunk: Buffer) => {
-      console.log('data!', opts.maxSize)
+      LOG.debug(`Data! max size: ${opts.maxSize}`)
       chunk.copy(rawData, offset)
       offset += chunk.length
     })
@@ -113,6 +110,7 @@ export class ApiServer {
     this.app.use(corsHandler)
 
     this.app.use(cookie())
+    this.app.use(express.json())
     this.app.use(
       new AuthHeaderMiddleware(COOKIE_NAME, this.config.sessionSecret)
         .middleware,
@@ -141,7 +139,6 @@ export class ApiServer {
     // reads and exhausts the body, so we can't go after that one.
     this.app.use(bodyTextMiddleware({ maxSize: 1024 * 1024 * 10 }))
 
-    this.app.use(express.json())
     this.app.use(express.urlencoded())
 
     this.app.use(this.authenticateRoutes.bind(this))
@@ -155,9 +152,7 @@ export class ApiServer {
   public async start() {
     return new Promise(resolve =>
       this.app.listen(this.config.port, () => {
-        LOG.info('Listening on port {port}.', {
-          port: this.config.port,
-        })
+        LOG.info(`Listening on port ${this.config.port}.`)
         resolve()
       }),
     )
@@ -165,9 +160,7 @@ export class ApiServer {
 
   private setupRoutes() {
     this.apiServices.forEach(s => {
-      LOG.debug(`Setting up API service at /{namespace}.`, {
-        namespace: s.namespace,
-      })
+      LOG.info(`Setting up API service at /${s.namespace}`)
       this.app.use(`/${s.namespace}`, s.getRouter())
     })
   }
@@ -179,7 +172,7 @@ export class ApiServer {
   ) {
     const roles = await this.authHandler.rolesFor(req)
     req.session!.roles = new Set(roles)
-    const allowed = true // await this.authHandler.isAuthorized(req)
+    const allowed = await this.authHandler.isAuthorized(req)
 
     if (!allowed) {
       return res.sendStatus(403)
