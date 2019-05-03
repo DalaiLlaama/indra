@@ -9,6 +9,8 @@ import { sleep, synchronized, maybe, Lock, Omit, prettySafeJson, safeJson } from
 import { Container } from "./Container";
 import { SignerService } from "./SignerService";
 import { serializeTxn } from "./util/ethTransaction";
+import Web3 from "web3";
+import w3utils = require('web3-utils')
 
 const LOG = log('OnchainTransactionService')
 
@@ -72,7 +74,7 @@ export class OnchainTransactionService {
   running: boolean = false
 
   constructor(
-    private web3: any, 
+    private web3: Web3, 
     private gasEstimateDao: GasEstimateDao, 
     private onchainTransactionDao: OnchainTransactionsDao, 
     private db: DBEngine,
@@ -120,8 +122,7 @@ export class OnchainTransactionService {
             state <> 'failed'
           order by nonce desc 
           limit 1
-          for update
-        ), 0) as nonce
+        ), 0) + 1 as nonce
       `)).nonce,
     )
 
@@ -129,7 +130,7 @@ export class OnchainTransactionService {
     if (!gasPrice)
       throw new Error('gasEstimateDao.latest() returned null')
 
-    const gasAmount = this.web3.utils.hexToNumber(
+    const gasAmount = w3utils.hexToNumber(
       txnRequest.gas ||
       await this.web3.eth.estimateGas({ ...web3TxRequest })
     )
@@ -138,7 +139,7 @@ export class OnchainTransactionService {
       from: txnRequest.from,
       to: txnRequest.to,
       value: txnRequest.value || '0',
-      gasPrice: this.web3.utils.toWei('' + gasPrice.fast, 'gwei'),
+      gasPrice: w3utils.toWei('' + gasPrice.fast, 'gwei'),
       gas: gasAmount,
       data: txnRequest.data || '0x',
       nonce: nonce,
@@ -251,6 +252,7 @@ export class OnchainTransactionService {
   }
 
   private async processPendingTxn(txn: OnchainTransactionRow): Promise<void> {
+    LOG.info(`processPendingTxn(${txn.hash}) state: ${txn.state}`)
     if (txn.state == 'new') {
       await this.submitToChain(txn)
       return
@@ -258,10 +260,6 @@ export class OnchainTransactionService {
 
     if (txn.state == 'submitted') {
       const [tx, err] = await maybe(this.web3.eth.getTransaction(txn.hash))
-      LOG.info('State of {txn.hash}: {res}, currently submitted', {
-        txn,
-        res: JSON.stringify(tx || err),
-      })
       if (err) {
         // TODO: what errors can happen here?
         LOG.warning(`Error checking status of tx '${txn.hash}': ${'' + err} (will retry)`)
@@ -328,10 +326,6 @@ export class OnchainTransactionService {
 
     if (txn.state == 'pending_failure') {
       const [tx, err] = await maybe(this.web3.eth.getTransaction(txn.hash))
-      LOG.info('State of {txn.hash}, currently pending_failure: {res}', {
-        txn,
-        res: JSON.stringify(tx || err),
-      })
       if (err) {
         // TODO: what errors can happen here?
         LOG.warning(`Error checking status of tx '${txn.hash}': ${'' + err} (will retry)`)
