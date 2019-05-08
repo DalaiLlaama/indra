@@ -24,9 +24,9 @@ cypress/integration/examples
 
 modules/database/snapshots/*
 
-backup/*
-v8-compile*/*
-yarn--**/*
+modules/hub/backup/*
+modules/hub/v8-compile*/*
+modules/hub/yarn--**/*
 
 # remove next line once hub is decoupled from spankchain
 modules/hub/package-lock.json
