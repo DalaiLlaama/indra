@@ -1,18 +1,31 @@
-import { PurchaseRequest, PurchasePayment, PaymentArgs, } from '../types'
+import { ethers as eth } from 'ethers'
+
+import { Big } from '../lib/bn'
+import { assertUnreachable } from '../lib/utils'
+import { getChannel } from '../state/getters'
+import {
+  argNumericFields,
+  insertDefault,
+  PartialPurchasePaymentRequest,
+  PartialPurchaseRequest,
+  Payment,
+  PaymentArgs,
+  PurchasePayment,
+  PurchasePaymentRequest,
+  Omit
+} from '../types'
+
 import { AbstractController } from './AbstractController'
-import { getChannel } from '../lib/getChannel'
-import { assertUnreachable } from '../lib/utils';
-import { emptyAddress } from '../Utils';
 
 // **********************************************//
 //
-//        How thread payments SHOULD work  
+//        How thread payments SHOULD work
 //
 //          [Single payment threads]
 //
 // *********************************************//
 
-// If sender: 
+// If sender:
 // 1. Buy Fn takes in {receiver, amountWei, amountToken}
 // 2. Generates open thread state and sends to hub
 // 3. Hub responds immediately with countersigned update
@@ -22,16 +35,72 @@ import { emptyAddress } from '../Utils';
 // 7. NOTE: For this to work, we have to allow multiple threads per sender-receiver combo
 
 export default class BuyController extends AbstractController {
-  public async buy(purchase: PurchaseRequest): Promise<{ purchaseId: string }> {
-    /*
-    purchase = {
-      ...purchase,
-      payments: purchase.payments.map(payment => ({
-        ...payment,
-        recipient: payment.recipient
-      })),
+  // assigns a payment type if it is not provided
+  public async assignPaymentType(p: PartialPurchasePaymentRequest): Promise<PurchasePaymentRequest> {
+    // insert default values of 0 into payment amounts
+    const { amountWei, amountToken, ...res } = p
+    const amount = insertDefault(
+      '0',
+      { amountWei, amountToken }, 
+      argNumericFields.Payment
+    )
+    let payment = {
+      ...res,
+      amount,
+      meta: res.meta || {},
     }
-    */
+
+    // if a type is provided, use it by default
+    if (payment.type) {
+      // TODO: why is it undefined here??
+      return payment as PurchasePaymentRequest
+    }
+
+    // otherwise, first check to see if it should be a link
+    if (payment.meta.secret) {
+      return {
+        ...payment,
+        type: `PT_LINK`,
+      }
+    }
+
+    // if the payment amount is above what the hub will collateralize
+    // it should be a custodial payment
+    const config = await this.connext.hub.config()
+    const max = Big(config.beiMaxCollateralization)
+    if (Big(payment.amount.amountToken).gt(max)) {
+      return {
+        ...payment,
+        type: "PT_CUSTODIAL",
+      }
+    }
+
+    // if the recipient is the hub, it should be a channel payment
+    if (payment.recipient.toLowerCase() == this.getState().persistent.hubAddress) {
+      return {
+        ...payment,
+        type: "PT_CHANNEL",
+      }
+    }
+
+    // otherwise, it should be an optimistic payment
+    return {
+      ...payment,
+      type: "PT_OPTIMISTIC"
+    }
+  }
+
+
+  /**
+   * This function takes in a PartialPurchaseReqest, which is an object 
+   * defined as:
+   * 
+   * ```javascript
+   * 
+   * ```
+   * 
+   */
+  public async buy(purchase: PartialPurchaseRequest): Promise<{ purchaseId: string }> {
 
     // Sign the payments
     const signedPayments: PurchasePayment[] = []
@@ -39,16 +108,22 @@ export default class BuyController extends AbstractController {
     // get starting state of the channel within the store
     // you must be able to process multiple thread or channel payments
     // with this as the initial state
-    let curChannelState = getChannel(this.store)
-    for (const payment of purchase.payments) {
+    let curChannelState = getChannel(this.store.getState())
+    for (const p of purchase.payments) {
       let newChannelState = null
+      // insert 0 defaults on purchase payment amount
+      const payment = await this.assignPaymentType(p)
+
+      if (!payment.type) {
+        throw new Error(`This should never happen. check "assignPaymentType" in the source code.`)
+      }
       switch (payment.type) {
         case 'PT_THREAD':
           // Create a new thread for the payment value
           const { thread, channel } = await this.connext.threadsController.openThread(
             payment.recipient, 
             payment.amount
-          )      
+          )
 
           // add thread payment to signed payments
           const state = await this.connext.signThreadState(
@@ -69,6 +144,8 @@ export default class BuyController extends AbstractController {
           // PUNT on this -- AB
           break
         case 'PT_CHANNEL':
+        // TODO: make this work for threads as well
+        case 'PT_OPTIMISTIC':
         case 'PT_CUSTODIAL':
           const chanArgs: PaymentArgs = {
             recipient: 'hub',
@@ -106,7 +183,7 @@ export default class BuyController extends AbstractController {
             throw new Error(`Secret is not present on linked payment, aborting purchase. Purchase: ${JSON.stringify(purchase, null, 2)}`)
           }
 
-          if (!this.connext.opts.web3.utils.isHex(secret)) {
+          if (!eth.utils.isHexString(secret)) {
             throw new Error(`Secret is not hex string, aborting purchase. Purchase: ${JSON.stringify(purchase, null, 2)}`)
           }
 
@@ -125,7 +202,7 @@ export default class BuyController extends AbstractController {
           signedPayments.push({
             ...payment,
             type: 'PT_LINK',
-            recipient: emptyAddress,
+            recipient: eth.constants.AddressZero,
             update: {
               reason: 'Payment',
               args: linkArgs,
@@ -145,7 +222,7 @@ export default class BuyController extends AbstractController {
       curChannelState = newChannelState
     }
 
-    const res = await this.connext.hub.buy(purchase.meta, signedPayments)
+    const res = await this.connext.hub.buy(purchase.meta || {}, signedPayments)
     this.connext.syncController.handleHubSync(res.sync)
     return res
   }

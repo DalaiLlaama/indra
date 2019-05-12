@@ -1,11 +1,16 @@
-import { ChannelStatus, ThreadHistoryItem, ThreadStateUpdate } from '../types'
-import { UpdateRequest } from '../types'
-//import Wallet from 'ethereumjs-wallet' //typescript doesn't like this module, needs declaration
-import { EMPTY_ROOT_HASH, ZERO_ADDRESS } from '../lib/constants'
 import { Store } from 'redux';
-import { ThreadState, ChannelState, Payment } from '../types'
-import { SyncResult } from '../types'
-import { ExchangeRateState } from './ConnextState/ExchangeRates'
+import { EMPTY_ROOT_HASH, ZERO_ADDRESS } from '../lib/constants'
+import {
+  ChannelState,
+  ChannelStatus,
+  ExchangeRateState,
+  Payment,
+  SyncResult,
+  ThreadHistoryItem,
+  ThreadState,
+  UpdateRequest,
+  CustodialBalanceRow,
+} from '../types'
 
 export const CHANNEL_ZERO_STATE = {
   user: '0x0',
@@ -44,13 +49,31 @@ export class SyncControllerState {
   updatesToSync: SyncResult[] = []
 }
 
+export type OnchainMonitoring = {
+  transactionHash: string | null,
+  submitted: boolean,
+  detected: boolean
+}
+
 export class RuntimeState {
-  awaitingOnchainTransaction: boolean = false
-  canDeposit: boolean = false
-  canExchange: boolean = false
-  canWithdraw: boolean = false
-  canBuy: boolean = false
-  canCollateralize: boolean = false
+  deposit: OnchainMonitoring = {
+    transactionHash: null,
+    submitted: false,
+    detected: false
+  }
+
+  withdrawal: OnchainMonitoring = {
+    transactionHash: null,
+    submitted: false,
+    detected: false
+  }
+
+  collateral: OnchainMonitoring = {
+    transactionHash: null,
+    submitted: false,
+    detected: false
+  }
+
   exchangeRate: null | ExchangeRateState = null
   syncResultsFromHub: SyncResult[] = []
   updateRequestTimeout: number = 60 * 10 // default 10 min
@@ -86,6 +109,17 @@ export class PersistentState {
   // reducer in reducers.
   latestValidState: ChannelState = CHANNEL_ZERO_STATE
 
+  custodialBalance: CustodialBalanceRow = {
+    balanceWei: '0',
+    balanceToken: '0',
+    totalReceivedToken: '0',
+    totalReceivedWei: '0',
+    totalWithdrawnToken: '0',
+    totalWithdrawnWei: '0',
+    sentWei: '0',
+    user: '0x0'
+  }
+
   activeThreads: ThreadState[] = [] // all open and active threads at latest state
   activeInitialThreadStates: ThreadState[] = [] // used to generate root hash
   // threadHistory is how the client will generate and track the 
@@ -95,6 +129,7 @@ export class PersistentState {
   threadHistory: ThreadHistoryItem[] = []
   lastThreadUpdateId: number = 0 // global hub db level
   syncControllerState = new SyncControllerState()
+  hubAddress: string = "0x0"
 }
 
 export class ConnextState {

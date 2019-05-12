@@ -1,28 +1,29 @@
+import { types, Validator, big } from 'connext'
 import * as request from 'supertest'
-
+import { default as ChannelManagerABI } from '../abi/ChannelManager'
 import { getRedisClient } from '../RedisClient'
 import { PgPoolService } from '../DBEngine'
 import { Container } from '../Container'
-
 import { truncateAllTables } from './eraseDb'
 import { ApiServer } from '../ApiServer'
 import { Role } from "../Role";
 import { mkAddress, mkSig, mkHash } from "./stateUtils";
-import { Validator } from '../vendor/connext/validator'
-import { Big } from '../util/bigNumber';
 import { SignerService } from '../SignerService';
-import { Utils } from '../vendor/connext/Utils';
 import Config from '../Config';
-import { ChannelManagerChannelDetails } from '../vendor/connext/types';
 import { serviceDefinitions } from '../services'
+const Web3 = require('web3')
+
+const {
+  Big
+} = big
+
+type ChannelManagerChannelDetails = types.ChannelManagerChannelDetails
 
 const databaseUrl = process.env.DATABASE_URL_TEST || 'postgres://127.0.0.1:5432';
 const redisUrl = process.env.REDIS_URL_TEST || 'redis://127.0.0.1:6379/6';
 const providerUrl = process.env.ETH_RPC_URL_TEST || 'http://127.0.0.1:8545';
 
 console.log(`test urls: database=${databaseUrl} redis=${redisUrl} provider=${providerUrl}`)
-
-const Web3 = require('web3')
 
 export class PgPoolServiceForTest extends PgPoolService {
   testNeedsReset = true
@@ -54,6 +55,19 @@ export class TestApiServer extends ApiServer {
         rolesFor: (req: any) => {
           req.session.address = address
           return [Role.AUTHENTICATED]
+        },
+        isAuthorized: () => true,
+      },
+    })
+  }
+
+  withAdmin(address?: string): TestApiServer {
+    address = address || '0xfeedface'
+    return this.container.resolve('TestApiServer', {
+      'AuthHandler': {
+        rolesFor: (req: any) => {
+          req.session.address = address
+          return [Role.ADMIN]
         },
         isAuthorized: () => true,
       },
@@ -102,7 +116,7 @@ class MockWeb3Provider {
 
 class MockValidator extends Validator {
   constructor() {
-    super({} as any, '0xfoobar')
+    super('0xfoobar', {} as any, ChannelManagerABI.abi)
   }
 
   assertChannelSigner() {
@@ -157,7 +171,7 @@ export class MockGasEstimateDao {
   }
 }
 
-export const mockRate = Big(123.45)
+export const mockRate = '123.45'
 export class MockExchangeRateDao {
   async latest() {
     return {
@@ -197,7 +211,7 @@ export class MockSignerService extends SignerService {
 }
 
 export const getMockWeb3 = () => {
-  const web3 = new Web3()
+  const web3 = new Web3(new Web3.providers.HttpProvider('http://localhost:8545'))
   return {
     ...web3,
     eth: {

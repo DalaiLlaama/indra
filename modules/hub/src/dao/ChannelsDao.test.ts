@@ -1,11 +1,11 @@
-import * as chai from 'chai'
+import * as Connext from 'connext';
 import { assert } from 'chai'
-chai.use(require('@spankchain/chai-subset'))
 import ChannelsDao from './ChannelsDao'
 import { getTestRegistry } from '../testing'
-import { assertChannelStateEqual, mkAddress, mkHash } from '../testing/stateUtils'
-import { convertChannelState } from '../vendor/connext/types';
+import { assertChannelStateEqual } from '../testing/stateUtils'
 import { channelUpdateFactory } from '../testing/factories';
+
+const { convertChannelState } = Connext.types
 
 describe('ChannelsDao', () => {
   const registry = getTestRegistry()

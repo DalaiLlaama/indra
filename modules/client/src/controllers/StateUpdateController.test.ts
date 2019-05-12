@@ -1,6 +1,6 @@
+import { assert, getThreadState, mkAddress, parameterizedTests, mkHash } from '../testing';
 import { MockStore, MockConnextInternal, MockHub } from '../testing/mocks';
-import { mkAddress, getThreadState } from '../testing';
-import { assert, parameterizedTests } from '../testing'
+import { PaymentArgs, SyncResult, ChannelUpdateReason } from '../types';
 // @ts-ignore
 global.fetch = require('node-fetch-polyfill');
 
@@ -12,7 +12,7 @@ const receiver = "0x22597df3d913c197b4d8f01a3530114847c20832"
 const user = "0xc55eddadeeb47fcde0b3b6f25bd47d745ba7e7fa"
 
 describe('StateUpdateController: thread payments', () => {
-  const user = mkAddress('0xUUU')
+  const user = mkAddress('0xAAA')
   let connext: MockConnextInternal
 
   parameterizedTests([
@@ -25,7 +25,6 @@ describe('StateUpdateController: thread payments', () => {
       name: 'close thread if received thread payment',
       receiver: true,
     },
-
   ], async tc => {
     const mockStore = new MockStore()
     mockStore.setChannel({
@@ -89,7 +88,118 @@ describe('StateUpdateController: thread payments', () => {
   })
 })
 
-describe('StateUpdateController: invalidation handling', () => {
+describe("StateUpdateController: hub to user payments", () => {
+  let connext: MockConnextInternal
+
+  parameterizedTests([
+    {
+      name: "should work for hub to user token payments",
+      syncResults: [{
+        type: "channel",
+        update: {
+          reason: "Payment",
+          args: {
+            recipient: "user",
+            amountToken: '1',
+            amountWei: '0',
+          },
+          txCount: 1,
+          sigHub: mkHash('0x51512'),
+          createdOn: new Date()
+        },
+      }],
+    },
+    {
+      name: "should fail for invalid payments from hub to user",
+      syncResults: [{
+        type: "channel",
+        update: {
+          reason: "Payment",
+          args: {
+            recipient: "user",
+            amountToken: '-1',
+            amountWei: '0',
+          },
+          txCount: 1,
+          sigHub: mkHash('0x51512'),
+          createdOn: new Date()
+        },
+      }],
+      fails: /There were 1 negative fields detected/
+    },
+    {
+      name: "should fail if the update returned by hub to sync queue is unsigned by hub",
+      syncResults: [{
+        type: "channel",
+        update: {
+          reason: "Payment",
+          args: {
+            recipient: "hub",
+            amountToken: '1',
+            amountWei: '1',
+          },
+          txCount: 1,
+          sigHub: '',
+        },
+      }],
+      fails: /sigHub not detected in update/
+    },
+    {
+      name: "should fail if the update returned by hub to sync queue is unsigned by user and directed to hub",
+      syncResults: [{
+        type: "channel",
+        update: {
+          reason: "Payment",
+          args: {
+            recipient: "hub",
+            amountToken: '1',
+            amountWei: '1',
+          } as PaymentArgs,
+          txCount: 1,
+          sigHub: mkHash('0x90283'),
+          sigUser: '',
+        },
+      }],
+      fails: /sigUser not detected in update/
+    }
+  ], async ({ name, syncResults, fails }) => {
+    const mockStore = new MockStore()
+    mockStore.setChannel({
+      user,
+      balanceWei: [5, 5],
+      balanceToken: [10, 10],
+    })
+    mockStore.setSyncResultsFromHub(syncResults as SyncResult[])
+    connext = new MockConnextInternal({
+      user,
+      store: mockStore.createStore()
+    })
+
+    if (fails) {
+      await assert.isRejected(connext.start(), fails)
+      return
+    }
+
+    await connext.start()
+
+    await new Promise(res => setTimeout(res, 20))
+
+    for (const res of syncResults) {
+      connext.mockHub.assertReceivedUpdate({
+        reason: res.update.reason as ChannelUpdateReason,
+        args: res.update.args,
+        sigUser: true,
+        sigHub: true,
+      })
+    }
+  })
+
+  afterEach(async () => {
+    await connext.stop()
+  })
+})
+
+describe.skip('StateUpdateController: invalidation handling', () => {
   const user = mkAddress('0xUUU')
   let connext: MockConnextInternal
 
@@ -126,7 +236,7 @@ describe('StateUpdateController: invalidation handling', () => {
       store: mockStore.createStore(),
     })
 
-    connext.opts.web3.eth.getBlock = async () => {
+    connext.provider.getBlock = async () => {
       return {
         timestamp: tc.blockTimestamp,
       } as any

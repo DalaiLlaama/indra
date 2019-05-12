@@ -1,10 +1,12 @@
+import * as eth from 'ethers'
+import * as Connext from 'connext';
 import { UnconfirmedTransaction, OnchainTransactionRow, RawTransaction } from "../domain/OnchainTransaction";
-import { Omit } from "../vendor/connext/types";
 import EthereumTx from "ethereumjs-tx"
-
 const Tx = require('ethereumjs-tx')
 
-const Web3 = require('web3')
+const toHex = (n: string|number) => eth.utils.bigNumberify(n).toHexString()
+
+type Omit<T, K extends keyof T> = Connext.types.Omit<T, K>
 
 /**
  * Serializes a transaction to a raw string.
@@ -29,14 +31,14 @@ export function txnToTx(txn: Omit<UnconfirmedTransaction, 'hash'>): EthereumTx {
   return new Tx({
     from: txn.from,
     to: txn.to,
-    value: Web3.utils.numberToHex(txn.value),
-    gasLimit: Web3.utils.numberToHex(txn.gas),
-    gasPrice: Web3.utils.numberToHex(txn.gasPrice),
+    value: toHex(txn.value),
+    gasLimit: toHex(txn.gas),
+    gasPrice: toHex(txn.gasPrice),
     data: txn.data,
-    nonce: Web3.utils.numberToHex(txn.nonce),
+    nonce: toHex(txn.nonce),
     r: txn.signature && txn.signature.r,
     s: txn.signature && txn.signature.s,
-    v: txn.signature && Web3.utils.numberToHex(txn.signature.v),
+    v: txn.signature && toHex(txn.signature.v),
   })
 }
 
@@ -47,11 +49,11 @@ export function rawTxnToTx(txn: RawTransaction): EthereumTx {
   return new Tx({
     from: txn.from,
     to: txn.to,
-    value: Web3.utils.numberToHex(txn.value),
-    gasLimit: Web3.utils.numberToHex(txn.gas),
-    gasPrice: Web3.utils.numberToHex(txn.gasPrice),
+    value: toHex(txn.value),
+    gasLimit: toHex(txn.gas),
+    gasPrice: toHex(txn.gasPrice),
     data: txn.data,
-    nonce: Web3.utils.numberToHex(txn.nonce),
+    nonce: toHex(txn.nonce),
   })
 }
 
@@ -62,10 +64,10 @@ export function onchainTxnToRawTx(txn: OnchainTransactionRow): EthereumTx {
   return new Tx({
     from: txn.from,
     to: txn.to,
-    value: Web3.utils.numberToHex(txn.value),
-    gasLimit: Web3.utils.numberToHex(txn.gas),
-    gasPrice: Web3.utils.numberToHex(txn.gasPrice),
+    value: toHex(txn.value),
+    gasLimit: toHex(txn.gas),
+    gasPrice: toHex(txn.gasPrice),
     data: txn.data,
-    nonce: Web3.utils.numberToHex(txn.nonce),
+    nonce: toHex(txn.nonce),
   })
 }

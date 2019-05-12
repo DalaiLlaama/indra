@@ -1,3 +1,4 @@
+import { StateGenerator, Utils, Validator } from 'connext';
 import { CustodialPaymentsService } from './custodial-payments/CustodialPaymentsService'
 import { CustodialPaymentsApiService } from './custodial-payments/CustodialPaymentsApiService'
 import { CoinPaymentsDao } from './coinpayments/CoinPaymentsDao'
@@ -8,7 +9,7 @@ import {
   Context,
   Container,
 } from './Container'
-import { ChannelManager } from './ChannelManager'
+import { ChannelManager } from './contract/ChannelManager'
 import AuthApiService from './api/AuthApiService'
 import { MemoryCRAuthManager } from './CRAuthManager'
 import Config from './Config'
@@ -52,13 +53,10 @@ import { PostgresFeatureFlagsDao } from './dao/FeatureFlagsDao'
 import FeatureFlagsApiService from './api/FeatureFlagsApiService'
 import { ApiServer } from './ApiServer'
 import { DefaultAuthHandler } from './middleware/AuthHandler'
-import { Utils } from './vendor/connext/Utils'
-import { Validator } from './vendor/connext/validator'
 import ThreadsService from './ThreadsService'
 import ThreadsApiService from './api/ThreadsApiService';
 import { OnchainTransactionService } from "./OnchainTransactionService";
 import { OnchainTransactionsDao } from "./dao/OnchainTransactionsDao";
-import { StateGenerator } from './vendor/connext/StateGenerator';
 import { SignerService } from './SignerService';
 import PaymentsService from './PaymentsService';
 import { NgrokService } from './NgrokService'
@@ -70,6 +68,11 @@ import ChannelDisputesDao, { PostgresChannelDisputesDao } from './dao/ChannelDis
 import { CoinPaymentsDepositPollingService } from './coinpayments/CoinPaymentsDepositPollingService'
 import ConfigApiService from './api/ConfigApiService';
 import { CustodialPaymentsDao } from './custodial-payments/CustodialPaymentsDao'
+import OptimisticPaymentDao, { PostgresOptimisticPaymentDao } from './dao/OptimisticPaymentDao';
+import { OptimisticPaymentsService } from './OptimisticPaymentsService';
+import PaymentProfilesApiService from './api/PaymentProfilesApiService';
+import PaymentProfilesDao, { PostgresPaymentProfilesDao } from './dao/PaymentProfilesDao';
+import PaymentProfilesService from './PaymentProfilesService';
 
 export default function defaultRegistry(otherRegistry?: Registry): Registry {
   const registry = new Registry(otherRegistry)
@@ -177,6 +180,7 @@ export const serviceDefinitions: PartialServiceDefinitions = {
       PaymentsApiService,
       CoinPaymentsApiService,
       CustodialPaymentsApiService,
+      PaymentProfilesApiService,
     ],
     isSingleton: true,
   },
@@ -202,8 +206,8 @@ export const serviceDefinitions: PartialServiceDefinitions = {
   },
 
   CRAuthManager: {
-    factory: (web3: any) => new MemoryCRAuthManager(web3),
-    dependencies: ['Web3'],
+    factory: () => new MemoryCRAuthManager(),
+    dependencies: [],
     isSingleton: true,
   },
 
@@ -267,8 +271,7 @@ export const serviceDefinitions: PartialServiceDefinitions = {
   GlobalSettingsDao: {
     factory: (db: DBEngine<Client>) => 
       new PostgresGlobalSettingsDao(db),
-    dependencies: ['DBEngine'],
-    isSingleton: true
+    dependencies: ['DBEngine']
   },
 
   ChainsawDao: {
@@ -280,6 +283,12 @@ export const serviceDefinitions: PartialServiceDefinitions = {
   PaymentsDao: {
     factory: (db: DBEngine<Client>) =>
       new PostgresPaymentsDao(db),
+    dependencies: ['DBEngine'],
+  },
+
+  OptimisticPaymentDao: {
+    factory: (db: DBEngine<Client>) =>
+      new PostgresOptimisticPaymentDao(db),
     dependencies: ['DBEngine'],
   },
 
@@ -300,18 +309,17 @@ export const serviceDefinitions: PartialServiceDefinitions = {
   },
 
   ConnextUtils: {
-    factory: () => new Utils(),
-    dependencies: [],
+    factory: (config: Config) => new Utils(),
+    dependencies: ['Config'],
   },
 
   Validator: {
-    factory: (web3: any, config: Config) => new Validator(web3, config.hotWalletAddress),
+    factory: (web3: any, config: Config) => new Validator(config.hotWalletAddress, web3.eth, ChannelManagerABI.abi),
     dependencies: ['Web3', 'Config'],
   },
 
   StateGenerator: {
     factory: () => new StateGenerator(),
-    dependencies: [],
   },
 
   GasEstimateDao: {
@@ -363,6 +371,12 @@ export const serviceDefinitions: PartialServiceDefinitions = {
     dependencies: ['DBEngine', 'Config'],
   },
 
+  PaymentProfilesDao: {
+    factory: (db: DBEngine<Client>, config: Config) =>
+      new PostgresPaymentProfilesDao(db, config),
+    dependencies: ['DBEngine', 'Config'],
+  },
+
   SignerService: {
     factory: (web3: any, contract: ChannelManager, utils: Utils, config: Config) => new SignerService(web3, contract, utils, config),
     dependencies: ['Web3', 'ChannelManagerContract', 'ConnextUtils', 'Config']
@@ -375,6 +389,7 @@ export const serviceDefinitions: PartialServiceDefinitions = {
       signerService: SignerService,
       paymentsDao: PaymentsDao,
       paymentMetaDao: PaymentMetaDao,
+      optimisticPaymentDao: OptimisticPaymentDao,
       channelsDao: ChannelsDao,
       custodialPaymentsDao: CustodialPaymentsDao,
       validator: Validator,
@@ -387,6 +402,7 @@ export const serviceDefinitions: PartialServiceDefinitions = {
       signerService,
       paymentsDao,
       paymentMetaDao,
+      optimisticPaymentDao,
       channelsDao,
       custodialPaymentsDao,
       validator,
@@ -400,13 +416,38 @@ export const serviceDefinitions: PartialServiceDefinitions = {
       'SignerService',
       'PaymentsDao',
       'PaymentMetaDao',
+      'OptimisticPaymentDao',
       'ChannelsDao',
       'CustodialPaymentsDao',
       'Validator',
       'Config',
       'DBEngine',
-      'GlobalSettingsDao',
+      'GlobalSettingsDao'
     ],
+  },
+
+  OptimisticPaymentsService: {
+    factory: (
+      db: DBEngine,
+      opPaymentDao: OptimisticPaymentDao,
+      channelsDao: ChannelsDao,
+      paymentsService: PaymentsService,
+      channelsService: ChannelsService
+    ) => new OptimisticPaymentsService(
+      db, 
+      opPaymentDao, 
+      channelsDao, 
+      paymentsService,
+      channelsService
+    ),
+    dependencies: [
+      'DBEngine',
+      'OptimisticPaymentDao',
+      'ChannelsDao',
+      'PaymentsService',
+      'ChannelsService'
+    ],
+    isSingleton: true
   },
 
   ChannelsService: {
@@ -426,6 +467,7 @@ export const serviceDefinitions: PartialServiceDefinitions = {
       config: Config,
       contract: ChannelManager,
       coinPaymentsDao: CoinPaymentsDao,
+      paymentProfilesService: PaymentProfilesService
     ) =>
       new ChannelsService(
         onchainTx,
@@ -443,6 +485,7 @@ export const serviceDefinitions: PartialServiceDefinitions = {
         config,
         contract,
         coinPaymentsDao,
+        paymentProfilesService,
       ),
     dependencies: [
       'OnchainTransactionService',
@@ -460,6 +503,7 @@ export const serviceDefinitions: PartialServiceDefinitions = {
       'Config',
       'ChannelManagerContract',
       'CoinPaymentsDao',
+      'PaymentProfilesService'
     ],
   },
 
@@ -543,5 +587,19 @@ export const serviceDefinitions: PartialServiceDefinitions = {
       'CustodialPaymentsDao',
       'OnchainTransactionService',
     ],
+  },
+
+  PaymentProfilesService: {
+    factory: (
+      paymentsProfileDao: PaymentProfilesDao,
+      db: DBEngine,
+    ) => new PaymentProfilesService(
+      paymentsProfileDao,
+      db,
+    ),
+    dependencies: [
+      'PaymentProfilesDao',
+      'DBEngine'
+    ]
   },
 }

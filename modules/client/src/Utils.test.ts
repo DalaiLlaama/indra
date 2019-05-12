@@ -1,86 +1,146 @@
-require('dotenv').config()
-const Web3 = require('web3')
-const HttpProvider = require(`ethjs-provider-http`)
+import { assert, expect } from 'chai'
+import { ethers as eth } from 'ethers'
+import Web3 from 'web3'
 
-import { expect } from 'chai'
+import MerkleTree from './lib/merkleTree'
+import { MerkleUtils } from './lib/merkleUtils'
+import * as testUtils from './testing/index'
+import {
+  Provider,
+} from './types'
 import { Utils } from './Utils'
-import { MerkleUtils } from './helpers/merkleUtils'
-// import { MerkleTree } from './helpers/merkleTree'
-import MerkleTree from './helpers/merkleTree'
-import * as t from './testing/index'
 
-const utils = new Utils()
+const mnemonic: string =
+  'candy maple cake sugar pudding cream honey rich smooth crumble sweet treat'
+const providers: string[] = [
+  'http://localhost:8545',
+  'http://ethprovider:8545',
+  'http://localhost:3000/api/eth',
+  'http://ganache:8545',
+]
+const utils: Utils = new Utils()
+const wallet: eth.Wallet = eth.Wallet.fromMnemonic(mnemonic)
+let web3: Web3 | undefined
+let web3Address: string
+
 describe('Utils', () => {
-  let web3: any
-  let accounts: string[]
-  let partyA: string
-  before('instantiate web3', async function () {
-    // instantiate web3
-    web3 = new Web3(new HttpProvider('http://localhost:8545'))
-    try {
-      accounts = await web3.eth.getAccounts()
-    } catch (e) {
-      console.log('error fetching web3 accounts:', '' + e)
-      console.warn(`No web3 HTTP provider found at 'localhost:8545'; skipping tests which require web3`)
-      this.skip()
-      return
+  beforeEach('instantiate wallets with pk and with web3', async () => {
+    // Try to connect to web3 and get an associated address
+    for (const p of providers) {
+      try {
+        web3 = new Web3(new Web3.providers.HttpProvider(p))
+        web3Address = (await web3.eth.getAccounts())[0]
+        break
+      } catch (e) {/* noop */}
     }
-    partyA = accounts[1]
   })
 
-  it('should recover the signer from the channel update when there are no threads', async () => {
-    // create and sign channel state update
-    const channelStateFingerprint = t.getChannelState('full', {
-      balanceWei: [100, 200],
-    })
-    // generate hash
-    const hash = utils.createChannelStateHash(channelStateFingerprint)
-    // sign
-    const sig = await web3.eth.sign(hash, partyA)
-    console.log(hash) // log harcode hash for other hash test
-    // recover signer
-    const signer = utils.recoverSignerFromChannelState(
-      channelStateFingerprint,
-      sig,
+  it('should properly recover the signer from the channel state update hash', async () => {
+    const hash: string = utils.createChannelStateHash(
+      testUtils.getChannelState('full', {
+        balanceWei: [1, 2],
+        user: wallet.address,
+      }),
     )
-    expect(signer).to.equal(partyA.toLowerCase())
+
+    // sign using all available methods
+    const sigs: any = [{
+        method: 'wallet.signMessage',
+        sig: await wallet.signMessage(eth.utils.arrayify(hash)),
+        signer: wallet.address,
+    }]
+
+    if (web3 && web3Address) {
+      sigs.push({
+        method: 'web3.eth.sign',
+        sig: await web3.eth.sign(hash, web3Address),
+        signer: web3Address,
+      })
+    } else {
+      console.warn(`    Couldn't connect to a web3 provider, skipping web3 signing tests`)
+    }
+
+    // recover signers
+    for (const s of sigs) {
+      const recovered: any = utils.recoverSigner(
+        hash,
+        s.sig,
+        s.signer.toLowerCase(),
+      )
+      expect(recovered, `Testing with signing method: ${s.method}`).to.equal(s.signer.toLowerCase())
+    }
   })
 
   it('should recover the signer from the thread state update', async () => {
-    // create and sign channel state update
-    const threadStateFingerprint = t.getThreadState('full', {
-      balanceWei: [100, 200],
-    })
-    // generate hash
-    const hash = utils.createThreadStateHash(threadStateFingerprint)
-    // sign
-    const sig = await web3.eth.sign(hash, partyA)
-    console.log(hash) // log harcode hash for other hash test
-    // recover signer
-    const signer = utils.recoverSignerFromThreadState(
-      threadStateFingerprint,
-      sig,
+    const hash: string = utils.createThreadStateHash(
+      testUtils.getThreadState('full', {
+        balanceWei: [1, 2],
+      }),
     )
-    expect(signer).to.equal(partyA.toLowerCase())
+
+    // sign using all available methods
+    const sigs: any = [
+      {
+        method: 'wallet.signMessage',
+        sig: await wallet.signMessage(eth.utils.arrayify(hash)),
+        signer: wallet.address,
+      },
+    ]
+
+    if (web3 && web3Address) {
+      sigs.push({
+        method: 'web3.eth.sign',
+        sig: await web3.eth.sign(hash, web3Address),
+        signer: web3Address,
+      })
+    } else {
+      console.warn(`    Couldn't connect to a web3 provider, skipping web3 signing tests`)
+    }
+
+    // recover signers
+    for (const s of sigs) {
+      const recovered: any = utils.recoverSigner(
+        hash,
+        s.sig,
+        s.signer.toLowerCase(),
+      )
+      expect(recovered, `Testing with signing method: ${s.method}`).to.equal(s.signer.toLowerCase())
+    }
   })
 
   it('should return the correct root hash', async () => {
-    const threadStateFingerprint = t.getThreadState('empty', {
-      balanceWei: [100, 0],
+    const threadStateFingerprint: any = testUtils.getThreadState('empty', {
+      balanceWei: [1, 2],
     })
     // TO DO: merkle tree class imports not working...?
     // generate hash
-    const hash = utils.createThreadStateHash(threadStateFingerprint)
+    const hash: string = utils.createThreadStateHash(threadStateFingerprint)
     // construct elements
-    const elements = [
+    const elements: any = [
       MerkleUtils.hexToBuffer(hash),
       MerkleUtils.hexToBuffer(utils.emptyRootHash),
     ]
-    const merkle = new MerkleTree(elements)
-    const expectedRoot = MerkleUtils.bufferToHex(merkle.getRoot())
-    const generatedRootHash = utils.generateThreadRootHash([
+    const merkle: any = new MerkleTree(elements)
+    const expectedRoot: any = MerkleUtils.bufferToHex(merkle.getRoot())
+    const generatedRootHash: any = utils.generateThreadRootHash([
       threadStateFingerprint,
     ])
     expect(generatedRootHash).to.equal(expectedRoot)
   })
+
+  const hasPendingOpsTests: any = [
+    [{ balanceWeiHub: '0', pendingDepositTokenHub: '0' }, false],
+    [{ balanceWeiHub: '1', pendingDepositTokenHub: '0' }, false],
+    [{ balanceWeiHub: '0', pendingDepositTokenHub: '1' }, true],
+    [{ balanceWeiHub: '1', pendingDepositTokenHub: '1' }, true],
+  ]
+
+  hasPendingOpsTests.forEach((test: any) => {
+    const input: any = test[0]
+    const expected: any = test[1]
+    it(`hasPendingOps(${JSON.stringify(input)}) => ${expected}`, () => {
+      assert.equal(utils.hasPendingOps(input), expected)
+    })
+  })
+
 })
