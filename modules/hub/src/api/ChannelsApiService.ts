@@ -51,7 +51,7 @@ export class ChannelsApiServiceHandler {
       updates: UpdateRequest[]
       lastThreadUpdateId: number
     }
-    if (!updates || !user || !Number.isInteger(lastThreadUpdateId)) {
+    if (!updates || !user || !Number.isInteger(parseInt(lastThreadUpdateId))) {
       LOG.warn(
         'Received invalid update state request. Aborting. Body received: {body}, Params received: {params}',
         {
@@ -189,12 +189,12 @@ export class ChannelsApiServiceHandler {
     const { tokensToSell, weiToSell, recipient, withdrawalWeiUser, withdrawalTokenUser, lastChanTx, exchangeRate } = req.body
 
     if (
-      !user || 
+      !user ||
       !recipient ||
-      !Number.isInteger(parseInt(withdrawalWeiUser)) || 
+      !Number.isInteger(parseInt(withdrawalWeiUser)) ||
       !Number.isInteger(parseInt(tokensToSell)) ||
       // TODO: token withdrawals
-      // !Number.isInteger(parseInt(weiToSell)) || 
+      // !Number.isInteger(parseInt(weiToSell)) ||
       // !Number.isInteger(parseInt(withdrawalTokenUser)) ||
       !exchangeRate
     ) {
