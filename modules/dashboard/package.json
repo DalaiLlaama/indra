@@ -4,6 +4,7 @@
   "private": true,
   "dependencies": {
     "@babel/helper-regex": "^7.0.0",
+    "@csstools/normalize.css": "^10.0.0",
     "@material-ui/core": "latest",
     "@material-ui/icons": "^3.0.2",
     "axios": "^0.18.0",
@@ -23,7 +24,7 @@
     "web3": "^1.0.0-beta.46"
   },
   "scripts": {
-    "start": "react-scripts start",
+    "start": "PORT=3003 react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test --env=jsdom",
     "eject": "react-scripts eject",
