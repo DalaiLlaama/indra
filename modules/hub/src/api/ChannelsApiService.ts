@@ -51,9 +51,11 @@ export class ChannelsApiServiceHandler {
       updates: UpdateRequest[]
       lastThreadUpdateId: number
     }
-    if (!updates || !user || !Number.isInteger(lastThreadUpdateId)) {
+    if (!updates || !user || !Number.isInteger(parseInt(lastThreadUpdateId))) {
+	LOG.warn( 'isInt? {isint}, {t}', {isint: Number.isInteger(lastThreadUpdateId), t: lastThreadUpdateId });
+	LOG.warn('updates: {updates}', {updates: updates});
       LOG.warn(
-        'Received invalid update state request. Aborting. Body received: {body}, Params received: {params}',
+        'Received invalid update state request. Aborting. \nBody received: {body}, \nParams received: {params}',
         {
           body: JSON.stringify(req.body),
           params: JSON.stringify(req.params),
