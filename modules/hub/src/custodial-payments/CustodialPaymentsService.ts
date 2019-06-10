@@ -7,9 +7,6 @@ import { default as ExchangeRateDao } from '../dao/ExchangeRateDao'
 import { default as DBEngine } from '../DBEngine'
 import { OnchainTransactionService } from '../OnchainTransactionService'
 import { BN, toBN, tokenToWei, toWei } from '../util'
-import { default as log } from '../util/log'
-
-const LOG = log('CustodialPaymentsService')
 
 export interface CreateCustodialWithdrawalArgs {
   user: string
@@ -52,7 +49,7 @@ export class CustodialPaymentsService {
       )
     }
 
-    const exchangeRate = await this.exchangeRates.getLatestUsdRate()
+    const exchangeRate = await this.exchangeRates.getLatestDaiRate()
     const amountWei = tokenToWei(amountToken, exchangeRate)
     const txn = await this.onchainTxnService.sendTransaction(this.db, {
       from: this.config.hotWalletAddress,

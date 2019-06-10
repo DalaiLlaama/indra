@@ -1,7 +1,6 @@
 import { isArray, isNullOrUndefined } from 'util'
 
-import { BN, isBN, toBN } from './lib/bn'
-import { CurrencyType } from './lib/currency'
+import { BN, isBN, toBN } from './lib'
 
 ////////////////////////////////////////
 // Export useful types defined in other modules
@@ -24,8 +23,6 @@ export {
 } from 'ethers/utils'
 
 export { ChannelManager } from './contract/ChannelManager'
-export { CurrencyType, default as Currency } from './lib/currency'
-export { CurrencyConvertable } from './lib/currencyConvertable'
 
 ////////////////////////////////////////
 // Common types eg Exchange Rates
@@ -41,27 +38,23 @@ export interface ExchangeRateState {
   rates: ExchangeRates
 }
 
+export const CurrencyType = { DAI: 'DAI', DEI: 'DEI', ETH: 'ETH', FIN: 'FIN', WEI: 'WEI' }
+export type CurrencyType = keyof typeof CurrencyType
+
 ////////////////////////////////////////
 // Constructor Types
 
-export interface ContractOptions {
-  hubAddress: string
-  tokenAddress: string
-}
-
 // config that could be returned from hub
-export interface HubConfig<T=string> extends ContractOptions {
-  channelManagerAddress: Address,
-  hubWalletAddress: Address,
+export interface HubConfig<T=string> {
+  contractAddress: Address,
+  ethChainId: string,
+  hubAddress: Address,
+  maxCollateralization: T
   tokenAddress: Address,
-  ethRpcUrl: string,
-  ethNetworkId: string,
-  beiMaxCollateralization: T
 }
 export type HubConfigBN = HubConfig<BN>
 
-// TODO: correctly define type
-export type ConnextProvider = any
+export type ConnextProvider = any // TODO
 
 /*********************************
  ****** HELPER FUNCTIONS *********
@@ -291,8 +284,8 @@ export interface WithdrawalArgs<T=string> {
   // If either value is omitted (or undefined), the previous balance will be used,
   // minus any `{wei,tokens}ToSell`; ie, the default value is:
   //   target{Wei,Token}User = prev.balance{Wei,Token}User - args.{wei,tokens}ToSell
-  targetWeiUser?: T
-  targetTokenUser?: T
+  targetWeiUser: T
+  targetTokenUser: T
 
   // The final `balance{Wei,Token}Hub` after the withdrawal:
   //
@@ -307,8 +300,8 @@ export interface WithdrawalArgs<T=string> {
   // If either value is omitted (or undefined), the previous balance will be used;
   // ie, the default value is:
   //   target{Wei,Token}Hub = prev.balance{Wei,Token}Hub
-  targetWeiHub?: T
-  targetTokenHub?: T
+  targetWeiHub: T
+  targetTokenHub: T
 
   // During a withdrawal, the hub may opt to send additional wei/tokens to
   // the user (out of the goodness of its heart, or to fulfill a custodial
@@ -371,12 +364,26 @@ export const InvalidationReason = {
 }
 export type InvalidationReason = keyof typeof InvalidationReason
 
-export interface InvalidationArgs {
-  previousValidTxCount: number
-  lastInvalidTxCount: number
+// If you are invalidating a withdrawal, you have to be able
+// to unwind any exchanges that happened in conjunction
+// with that withdrawal. This is a case the contract does not
+// have to handle, since it ignores states with timeouts. It
+// is supplied optionally if the user is invalidating an onchain
+// exchange.
+// NOTE: it is safe to not provide any onchainExchange information
+// if you are solely depositing with your exchange (ie hub deposits
+// into users chan if it cant afford requested exchange)
+// in the case of withdrawals, because it affects the
+// operating channel balance, the onchain exchange
+// information should be supplied so ownership
+// can be properly reverted (validators should ensure this)
+export interface InvalidationArgs<T=string> {
+  withdrawal: WithdrawalArgs<T> | undefined
+  invalidTxCount: number,
   reason: InvalidationReason
   message?: string
 }
+export type InvalidationArgsBN = InvalidationArgs<BN>
 
 export type EmptyChannelArgs = ConfirmPendingArgs
 
@@ -386,7 +393,7 @@ export type ArgsTypes<T=string> =
   | DepositArgs<T>
   | WithdrawalArgs<T>
   | ConfirmPendingArgs
-  | InvalidationArgs
+  | InvalidationArgs<T>
   | EmptyChannelArgs
   | ThreadState<T>
   | {}
@@ -781,6 +788,13 @@ export type PaymentProfileConfigBN = PaymentProfileConfig<BN>
 // POST /payments/purchase
 // Accepts: { metadata: MetadataType, payments: PurchasePayment[], }
 // Returns: { purchaseId: string, updates: SyncResponse, }
+
+// sending email
+export interface EmailRequest {
+  to: string
+  subject: string
+  text: string
+}
 
 // custodial payments
 export interface CustodialBalanceRow<T=string> {

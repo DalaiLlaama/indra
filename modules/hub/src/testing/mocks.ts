@@ -1,10 +1,8 @@
 import * as connext from 'connext'
 import { ChannelManagerChannelDetails } from 'connext/types'
+import { ethers as eth } from 'ethers'
 import * as request from 'supertest'
 const Web3 = require('web3')
-
-import { truncateAllTables } from './eraseDb'
-import { mkAddress, mkHash, mkSig } from './stateUtils'
 
 import { default as ChannelManagerABI } from '../abi/ChannelManager'
 import { ApiServer } from '../ApiServer'
@@ -15,12 +13,38 @@ import { getRedisClient } from '../RedisClient'
 import { Role } from '../Role'
 import { serviceDefinitions } from '../services'
 import { SignerService } from '../SignerService'
+import { Logger } from '../util'
 
+import { truncateAllTables } from './eraseDb'
+import { mkAddress, mkHash, mkSig } from './stateUtils'
+
+export const defaultLogLevel = 3
+
+const serviceKey = 'unspank-the-unbanked'
+const mnemonic = 'candy maple cake sugar pudding cream honey rich smooth crumble sweet treat'
 const databaseUrl = process.env.DATABASE_URL_TEST || 'postgres://127.0.0.1:5432'
 const redisUrl = process.env.REDIS_URL_TEST || 'redis://127.0.0.1:6379/6'
-const providerUrl = process.env.ETH_RPC_URL_TEST || 'http://127.0.0.1:8545'
+export const providerUrl = process.env.ETH_RPC_URL_TEST || 'http://127.0.0.1:8545'
 
-console.log(`test urls: database=${databaseUrl} redis=${redisUrl} provider=${providerUrl}`)
+console.log(`\nTest urls:\n - db: ${databaseUrl}\n - redis: ${redisUrl}\n - eth: ${providerUrl}`)
+
+export const authHeaders = { 'authorization': `bearer ${serviceKey}` }
+export const testChannelManagerAddress = mkAddress('0xCCC')
+export const testHotWalletAddress = '0x7776900000000000000000000000000000000000'
+export const getTestConfig = (overrides?: any) => ({
+  ...Config.fromEnv(),
+  adminAddresses: [ testHotWalletAddress ],
+  channelManagerAddress: testChannelManagerAddress,
+  databaseUrl,
+  ethRpcUrl: providerUrl,
+  hotWalletAddress: testHotWalletAddress,
+  logLevel: defaultLogLevel,
+  redisUrl,
+  serviceKey,
+  sessionSecret: 'hummus',
+  staleChannelDays: 1,
+  ...(overrides || {}),
+})
 
 export class PgPoolServiceForTest extends PgPoolService {
   testNeedsReset = true
@@ -38,37 +62,19 @@ export class PgPoolServiceForTest extends PgPoolService {
 }
 
 export class TestApiServer extends ApiServer {
-  request: request.SuperTest<request.Test>
-
-  constructor(container: Container) {
+  public constructor(container: Container) {
     super(container)
     this.request = request(this.app)
   }
 
-  withUser(address?: string): TestApiServer {
-    address = address || '0xfeedface'
-    return this.container.resolve('TestApiServer', {
-      'AuthHandler': {
-        rolesFor: (req: any) => {
-          req.session.address = address
-          return [Role.AUTHENTICATED]
-        },
-        isAuthorized: () => true,
-      },
-    })
+  public request: request.SuperTest<request.Test>
+
+  public withUser(address?: string): TestApiServer {
+    return this.container.resolve('TestApiServer')
   }
 
-  withAdmin(address?: string): TestApiServer {
-    address = address || '0xfeedface'
-    return this.container.resolve('TestApiServer', {
-      'AuthHandler': {
-        rolesFor: (req: any) => {
-          req.session.address = address
-          return [Role.ADMIN]
-        },
-        isAuthorized: () => true,
-      },
-    })
+  public withAdmin(address?: string): TestApiServer {
+    return this.container.resolve('TestApiServer')
   }
 }
 
@@ -102,8 +108,6 @@ class MockWeb3Provider {
   sendAsync(payload, callback) {
     if (payload.id)
       this.countId = payload.id
-
-    console.log('SEND ASYNC:', payload)
   }
 
   on(type, callback) {
@@ -131,19 +135,6 @@ class MockValidator extends connext.Validator {
     return null
   }
 }
-
-export const testChannelManagerAddress = mkAddress('0xCCC')
-export const testHotWalletAddress = '0x7776900000000000000000000000000000000000'
-export const getTestConfig = (overrides?: any) => ({
-  ...Config.fromEnv(),
-  databaseUrl,
-  redisUrl,
-  sessionSecret: 'hummus',
-  hotWalletAddress: testHotWalletAddress,
-  channelManagerAddress: testChannelManagerAddress,
-  staleChannelDays: 1,
-  ...(overrides || {}),
-})
 
 export class MockGasEstimateDao {
   async latest() {
@@ -174,16 +165,16 @@ export class MockExchangeRateDao {
     return {
       retrievedAt: Date.now(),
       rates: {
-        USD: mockRate
+        DAI: mockRate
       }
     }
   }
 
-  async getLatestUsdRate() {
+  async getLatestDaiRate() {
     return mockRate
   }
 
-  async getUsdRateAtTime(date: Date) {
+  async getDaiRateAtTime(date: Date) {
     return mockRate
   }
 }
@@ -207,8 +198,9 @@ export class MockSignerService extends SignerService {
   }
 }
 
-export const getMockWeb3 = () => {
-  const web3 = new Web3(new Web3.providers.HttpProvider('http://localhost:8545'))
+export const getMockWeb3 = (config: Config = getTestConfig()) => {
+  const log = new Logger('MockWeb3', config.logLevel)
+  const web3 = new Web3(new Web3.providers.HttpProvider(providerUrl))
   return {
     ...web3,
     eth: {
@@ -238,7 +230,7 @@ export const getMockWeb3 = () => {
         }
       },
       sendSignedTransaction: () => {
-        console.log(`Called mocked web3 function sendSignedTransaction`)
+        log.info(`Called mocked web3 function sendSignedTransaction`)
         return {
           on: (input, cb) => {
             switch (input) {
@@ -251,7 +243,7 @@ export const getMockWeb3 = () => {
         }
       },
       sendTransaction: () => {
-        console.log(`Called mocked web3 function sendTransaction`)
+        log.info(`Called mocked web3 function sendTransaction`)
         return {
           on: (input, cb) => {
             switch (input) {
@@ -276,21 +268,25 @@ export function clearFakeClosingTime() {
 }
 
 export class MockChannelManagerContract {
+  private log: Logger
+  constructor(config: Config = getTestConfig()) {
+    this.log = new Logger('MockChannelManager', config.logLevel)
+  }
   methods = {
     hubAuthorizedUpdate: () => {
       return {
         send: async () => {
-          console.log(`Called mocked contract function hubAuthorizedUpdate`)
+          this.log.info(`Called mocked contract function hubAuthorizedUpdate`)
           return true
         },
         encodeABI: () => {
-          console.log(`Called mocked contract function hubAuthorizedUpdate`)
+          this.log.info(`Called mocked contract function hubAuthorizedUpdate`)
           return true
         },
       }
     },
     getChannelDetails: () => {
-      console.log(`Called mocked contract function getChannelDetails`)
+      this.log.info(`Called mocked contract function getChannelDetails`)
       return {
         call: async () => {
           return [
@@ -306,7 +302,7 @@ export class MockChannelManagerContract {
       }
     },
     startExitWithUpdate: () => {
-      console.log(`Called mocked contract function startExitWithUpdate`)
+      this.log.info(`Called mocked contract function startExitWithUpdate`)
       return {
         send: async () => {
           return true
@@ -317,7 +313,7 @@ export class MockChannelManagerContract {
       }
     },
     startExit: () => {
-      console.log(`Called mocked contract function startExit`)
+      this.log.info(`Called mocked contract function startExit`)
       return {
         send: async () => {
           return true
@@ -328,7 +324,7 @@ export class MockChannelManagerContract {
       }
     },
     emptyChannel: () => {
-      console.log(`Called mocked contract function emptyChannel`)
+      this.log.info(`Called mocked contract function emptyChannel`)
       return {
         send: async () => {
           return true
@@ -398,6 +394,7 @@ export const mockServices: any = {
   },
 
   'ChannelManagerContract': {
-    factory: () => new MockChannelManagerContract(),
+    factory: (config: any) => new MockChannelManagerContract(config),
+    dependencies: ['Config'],
   },
 }

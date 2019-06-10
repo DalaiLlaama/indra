@@ -15,8 +15,7 @@ import { Client } from 'pg'
 import Config from '../Config'
 import DBEngine, { SQL } from '../DBEngine'
 import { mkSig } from '../testing/stateUtils'
-import { BN, prettySafeJson, toBN } from '../util'
-import { default as log } from '../util/log'
+import { BN, Logger, prettySafeJson, toBN } from '../util'
 
 export default interface ChannelsDao {
   getChannelByUser(user: string): Promise<ChannelRowBN | null>
@@ -46,7 +45,7 @@ export default interface ChannelsDao {
   getLatestDoubleSignedState(user: string): Promise<ChannelStateUpdateRowBN|null>
   invalidateUpdates(user: string, invalidationArgs: InvalidationArgs): Promise<void>
   getDisputedChannelsForClose(disputePeriod: number): Promise<ChannelRowBN[]>
-  getStaleChannels(): Promise<ChannelRowBN[]>
+  getStaleChannels(staleChannelDays: number): Promise<ChannelRowBN[]>
   addChainsawErrorId(user: Address, id: number): Promise<void>
   removeChainsawErrorId(user: Address): Promise<void>
   getChannelUpdateById(id: number): Promise<ChannelStateUpdateRowBN>
@@ -82,16 +81,15 @@ export function getChannelInitialState(
   }
 }
 
-const LOG = log('ChannelsDao')
-
 export class PostgresChannelsDao implements ChannelsDao {
-  private db: DBEngine<Client>
-
   private config: Config
+  private db: DBEngine<Client>
+  private log: Logger
 
   constructor(db: DBEngine<Client>, config: Config) {
     this.db = db
     this.config = config
+    this.log = new Logger('ChannelsDao', config.logLevel)
   }
 
   async getChannelUpdateById(id: number): Promise<ChannelStateUpdateRowBN> {
@@ -200,7 +198,7 @@ export class PostgresChannelsDao implements ChannelsDao {
     )
   }
 
-  async applyUpdateByUser(
+  public async applyUpdateByUser(
     user: string,
     reason: ChannelUpdateReason,
     originator: string,
@@ -210,7 +208,8 @@ export class PostgresChannelsDao implements ChannelsDao {
     onchainLogicalId?: number,
   ): Promise<ChannelStateUpdateRowBN> {
 
-    LOG.info(`Applying channel update to ${user}: ${reason}(${prettySafeJson(args)}) -> ${prettySafeJson(state)}`)
+    this.log.info(`Applying channel update to ${user}: ${reason}(${prettySafeJson(args)}) ` +
+      `-> ${prettySafeJson(state)}`)
 
     return this.inflateChannelUpdateRow(
       await this.db.queryOne(SQL`
@@ -386,24 +385,19 @@ export class PostgresChannelsDao implements ChannelsDao {
       UPDATE _cm_channel_updates
       SET invalid = ${invalidationArgs.reason}
       WHERE
-        tx_count_global > ${invalidationArgs.previousValidTxCount} AND
-        tx_count_global <= ${invalidationArgs.lastInvalidTxCount} AND
+        tx_count_global = ${invalidationArgs.invalidTxCount} AND
         "user" = ${user.toLowerCase()}
       RETURNING id
     `)
   }
 
-  async getStaleChannels() {
+  async getStaleChannels(staleChannelDays: number) {
     // stale channels are channels that havent been updated
     // within the `staleChannelDays` days
 
     // custodial withdrawals occur via direct eth transfer, so 
     // there is no reason to include any custodial payments
     // in the query logic. only need to check against latest channel update
-    const staleChannelDays = this.config.staleChannelDays
-    if (!staleChannelDays) {
-      return []
-    }
 
     const { rows } = await this.db.query(SQL`
       SELECT * 
@@ -412,6 +406,7 @@ export class PostgresChannelsDao implements ChannelsDao {
         contract = ${this.config.channelManagerAddress} AND
         last_updated_on < NOW() - (${staleChannelDays}::text || ' days')::INTERVAL AND
         status = 'CS_OPEN'
+        ORDER BY "balance_token_hub" DESC
     `)
     return rows.map(r => this.inflateChannelRow(r))
   }

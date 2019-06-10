@@ -1,212 +1,142 @@
-import { MaybeRes } from './util'
-import { ezPromise, maybe } from './util'
-import Config from './Config'
-import * as express from 'express'
-import * as session from 'express-session'
-import * as cookie from 'cookie-parser'
-import log from './util/log'
-import { Container } from './Container'
-import { ApiService } from './api/ApiService'
-import {
-  default as AuthHandler,
-} from './middleware/AuthHandler'
-import AuthHeaderMiddleware from './middleware/AuthHeaderMiddleware'
 import * as cors from 'cors'
+import * as express from 'express'
+import https from 'https'
+import selfsigned from 'selfsigned'
+import * as WebSocket from 'ws'
 
-const LOG = log('ApiServer')
-const SESSION_LOG = log('ConnectRedis')
-
-const COOKIE_NAME = 'hub.sid'
-
-const RedisStore = require('connect-redis')(session)
-
-const requestLog = log('requests')
-const requestLogMiddleware = (req: any, res: any, next: any): any => {
-  req._startTime = Date.now()
-  res.on('finish', () => {
-    const remoteAddr = req.ip || req.headers['x-forwarded-for'] || req.address
-    let duration = Date.now() - req._startTime
-    requestLog.info('{remoteAddr} {method} {url} {inSize} -> {statusCode} ({outSize}; {duration})', {
-      remoteAddr,
-      method: req.method,
-      url: req.originalUrl,
-      statusCode: res.statusCode,
-      inSize: (req.get('content-length') || '0') + ' bytes',
-      outSize: (res.get('content-length') || '?') + ' bytes',
-      duration: (duration / 1000).toFixed(3) + 'ms',
-    })
-  })
-  next()
-}
-
-/**
- * Adds `getText(): Promise<string>` and `getRawBody(): Promise<Buffer>`
- * methods to `req`. They will reject if no content-length is provided,
- * or the content-length > maxSize.
- */
-function bodyTextMiddleware(opts: { maxSize: number }) {
-  return (req, res, next) => {
-    const rawPromise = ezPromise<MaybeRes<Buffer>>()
-    const textPromise = ezPromise<MaybeRes<string>>()
-
-    req.getRawBody = () => maybe.unwrap(rawPromise.promise)
-    req.getText = () => maybe.unwrap(textPromise.promise)
-
-    const size = +req.headers['content-length']
-    if (size != size || size > opts.maxSize) {
-      const msg = (
-        size > opts.maxSize ?
-          `bodyTextMiddleware: body too large (${size} > ${opts.maxSize}); not parsing.` :
-          `bodyTextMiddleware: no content-length; not parsing body.`
-      )
-      LOG.debug(msg)
-      const rej = maybe.reject(new Error(msg))
-      rawPromise.resolve(rej as any)
-      textPromise.resolve(rej as any)
-      return next()
-    }
-
-    const rawData = Buffer.alloc(size)
-    let offset = 0
-    req.on('data', (chunk: Buffer) => {
-      LOG.debug(`Data! max size: ${opts.maxSize}`)
-      chunk.copy(rawData, offset)
-      offset += chunk.length
-    })
-
-    req.on('end', () => {
-      // Assume UTF-8 because there's no easy way to get the correct charset ¯\_(ツ)_/¯
-      rawPromise.resolve(maybe.accept(rawData))
-      textPromise.resolve(maybe.accept(rawData.toString('utf8')))
-    })
-
-    return next()
-  }
-}
+import { ApiService } from './api/ApiService'
+import Config from './Config'
+import { Container } from './Container'
+import { getAuthMiddleware } from './middleware/AuthMiddleware'
+import { ezPromise, Logger, maybe, MaybeRes } from './util'
 
 export class ApiServer {
-  app: express.Application
+  public app: express.Application
+  private log: Logger
+  private readonly config: Config
+  private readonly apiServices: ApiService[]
 
-  config: Config
-  container: Container
-  authHandler: AuthHandler
-  apiServices: ApiService[]
-
-  constructor(container: Container) {
-    this.container = container
+  public constructor(protected readonly container: Container) {
     this.config = container.resolve('Config')
-    this.authHandler = this.container.resolve('AuthHandler')
-
-    this.app = express()
-    this.app.use(requestLogMiddleware)
-
-    const corsHandler = cors({
-      origin: true,
-      credentials: true,
-    })
-    this.app.options('*', corsHandler)
-    this.app.use(corsHandler)
-
-    this.app.use(cookie())
-    this.app.use(express.json())
-    this.app.use(
-      new AuthHeaderMiddleware(COOKIE_NAME, this.config.sessionSecret)
-        .middleware,
-    )
-    this.app.use(
-      session({
-        secret: this.config.sessionSecret,
-        name: COOKIE_NAME,
-        resave: false,
-        store: new RedisStore({
-          url: this.config.redisUrl,
-          logErrors: (err: any) =>
-            SESSION_LOG.error('Encountered error in Redis session: {err}', {
-              err,
-            }),
-        }),
-        cookie: {
-          httpOnly: true,
-        },
-      }),
-    )
-
-    // Note: this needs to come before the `express.json()` middlware, but
-    // after the session middleware. I have no idea why, but if it's before the
-    // session middleware requests hang, and the `express.json()` middleware
-    // reads and exhausts the body, so we can't go after that one.
-    this.app.use(bodyTextMiddleware({ maxSize: 1024 * 1024 * 10 }))
-
-    this.app.use(express.urlencoded())
-
-    this.app.use(this.authenticateRoutes.bind(this))
-    this.app.use(this.logErrors.bind(this))
-
+    this.log = new Logger('ApiServer', this.config.logLevel)
+    const corsHandler = cors({ credentials: true, origin: true })
     const apiServiceClasses = container.resolve('ApiServerServices') as any[]
-    this.apiServices = apiServiceClasses.map(cls => new cls(this.container))
-    this.setupRoutes()
-  }
-
-  public async start() {
-    return new Promise(resolve =>
-      this.app.listen(this.config.port, () => {
-        LOG.info(`Listening on port ${this.config.port}.`)
-        resolve()
-      }),
+    this.apiServices = apiServiceClasses.map(
+      (cls: any): any => new cls(this.container),
+    )
+    this.app = express()
+    this.app.options('*', corsHandler)
+    // Start constructing API pipeline
+    this.app.use(this.requestLogMiddleware.bind(this))
+    this.app.use(corsHandler)
+    this.app.use(getAuthMiddleware(this.config))
+    this.app.use(express.json())
+    this.app.use(this.bodyTextMiddleware({ maxSize: 1024 * 1024 * 10 }).bind(this))
+    this.app.use(express.urlencoded({ extended: false }))
+    this.app.use(this.logErrors.bind(this))
+    this.apiServices.forEach(
+      (s: any): any => {
+        this.log.info(`Setting up API service at /${s.namespace}`)
+        this.app.use(`/${s.namespace}`, s.getRouter())
+      },
     )
   }
 
-  private setupRoutes() {
-    this.apiServices.forEach(s => {
-      LOG.info(`Setting up API service at /${s.namespace}`)
-      this.app.use(`/${s.namespace}`, s.getRouter())
+  public async start(): Promise<void> {
+    return new Promise((resolve: any): void => {
+      let port = this.config.port
+      let server: any = this.app
+      if (this.config.forceSsl) {
+        const pems = selfsigned.generate(
+          [{ name: 'commonName', value: 'localhost' }],
+          { days: 365, keySize: 4096 },
+        )
+        port = this.config.httpsPort
+        server = https.createServer({ key: pems.private, cert: pems.cert }, this.app)
+      }
+      server.listen(port, (err: any): void => {
+        if (err) throw err
+        this.log.info(`Listening on port: ${port}.`)
+        resolve()
+      })
     })
   }
 
-  protected async authenticateRoutes(
-    req: express.Request,
-    res: express.Response,
-    next: () => void,
-  ) {
-    const roles = await this.authHandler.rolesFor(req)
-    req.session!.roles = new Set(roles)
-    const allowed = await this.authHandler.isAuthorized(req)
-
-    if (!allowed) {
-      return res.sendStatus(403)
+  /**
+   * Adds `getText(): Promise<string>` and `getRawBody(): Promise<Buffer>`
+   * methods to `req`. They will reject if no content-length is provided,
+   * or the content-length > maxSize.
+   */
+  private bodyTextMiddleware(opts: { maxSize: number }): any {
+    return (
+      req: express.Request,
+      res: express.Response,
+      next: () => any,
+    ): any => {
+      const rawPromise = ezPromise<MaybeRes<Buffer>>()
+      const textPromise = ezPromise<MaybeRes<string>>()
+      req.getRawBody = (): any => maybe.unwrap(rawPromise.promise)
+      req.getText = (): any => maybe.unwrap(textPromise.promise)
+      const size = +req.headers['content-length']
+      if (size > opts.maxSize) {
+        const msg =
+          size > opts.maxSize
+            ? `bodyTextMiddleware: body too large (${size} > ${
+                opts.maxSize
+              }); not parsing.`
+            : `bodyTextMiddleware: no content-length; not parsing body.`
+        this.log.debug(msg)
+        const rej = maybe.reject(new Error(msg))
+        rawPromise.resolve(rej as any)
+        textPromise.resolve(rej as any)
+        return next()
+      }
+      const rawData = Buffer.alloc(size)
+      let offset = 0
+      req.on('data', (chunk: Buffer) => {
+        this.log.debug(`Data! max size: ${opts.maxSize}`)
+        chunk.copy(rawData, offset)
+        offset += chunk.length
+      })
+      req.on('end', () => {
+        // Assume UTF-8 because there's no easy way to get the correct charset ¯\_(ツ)_/¯
+        rawPromise.resolve(maybe.accept(rawData))
+        textPromise.resolve(maybe.accept(rawData.toString('utf8')))
+      })
+      return next()
     }
-
-    next()
   }
 
-  private logErrors(
-    err: any,
-    req: express.Request,
-    res: express.Response,
-    next: any,
-  ) {
+  private logErrors(err: any, req: express.Request, res: express.Response, next: any): void {
     if (res.headersSent) {
       return next(err)
     }
-
     res.status(500)
     res.json({
       error: true,
-      reason: 'Unknown Error',
       msg: err.message,
+      reason: 'Unknown Error',
       stack: err.stack,
     })
-
-    LOG.error('Unknown error in {req.method} {req.path}: {message}', {
-      message: err.message,
-      stack: err.stack,
-      req: {
-        method: req.method,
-        path: req.path,
-        query: req.query,
-        body: req.body,
-      },
-    })
+    this.log.error(`Unknown error in ${req.method} ${req.path}: ${err.message}`)
   }
-}
 
+  private requestLogMiddleware(
+    req: express.Request,
+    res: express.Response,
+    next: () => any,
+  ): void {
+    const startTime = Date.now()
+    res.on('finish', () => {
+      const remoteAddr =
+        req.ip || req.headers['x-forwarded-for'] || (req as any).address
+      const duration = Date.now() - startTime
+      this.log.info(
+        `${remoteAddr} ${req.method} ${req.originalUrl} ${req.get('content-length') || '0'} bytes` +
+        ` -> ${res.statusCode} (${res.get('content-length') || '?'} bytes; ` +
+        `${(duration / 1000).toFixed(3)} ms)`)
+    })
+    next()
+  }
+
+}

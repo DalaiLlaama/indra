@@ -1,11 +1,8 @@
 import { ethers as eth } from 'ethers'
 
 import { ConnextInternal } from '../Connext'
-import { toBN, toWei } from '../lib/bn'
-import { Poller } from '../lib/poller'
-import * as actions from '../state/actions'
-import { getExchangeRates, getTxCount } from '../state/getters'
-import { ConnextStore } from '../state/store'
+import { Poller, toBN, toWei } from '../lib'
+import { actions, ConnextStore, getExchangeRates, getTxCount } from '../state'
 
 import { AbstractController } from './AbstractController'
 
@@ -58,6 +55,7 @@ export class ExchangeController extends AbstractController {
       if (rates.DAI) {
         // These are the values wallet expects
         rates.DAI = rates.DAI
+        rates.DEI = eth.utils.parseEther(rates.DAI).toString()
         rates.ETH = toBN(1).toString()
         rates.FIN = WeiPerEther.div(eth.utils.parseUnits('1', 'finney')).toString()
         rates.WEI = WeiPerEther.toString()
@@ -68,7 +66,7 @@ export class ExchangeController extends AbstractController {
         }))
       }
     } catch (e) {
-      console.error('Error polling for exchange rates:', e)
+      this.log.error(`Error polling for exchange rates: ${e}`)
       // TODO: properly log this, once API logger is in
     }
   }
@@ -91,7 +89,7 @@ export class ExchangeController extends AbstractController {
       toBN(channel.balanceWeiUser).lt(weiToSell)
       || toBN(channel.balanceTokenUser).lt(tokensToSell)
     ) {
-      console.error(
+      this.log.error(
         `User does not have sufficient wei or token for exchange. ` +
         `Wei: ${weiToSell}, tokens: ${tokensToSell}, ` +
         `channel: ${JSON.stringify(channel, undefined, 2)}`)
@@ -101,6 +99,6 @@ export class ExchangeController extends AbstractController {
       weiToSell, tokensToSell, getTxCount(this.store.getState()),
     )
     this.connext.syncController.handleHubSync(sync)
-
+    return
   }
 }

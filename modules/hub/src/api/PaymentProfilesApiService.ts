@@ -1,66 +1,69 @@
 import * as express from 'express'
 import { isArray } from 'util'
 
+import { Config } from '../Config'
 import PaymentProfilesService from '../PaymentProfilesService'
-import { toBN } from '../util'
-import log, { logApiRequestError } from '../util/log'
+import { logApiRequestError, Logger, toBN } from '../util'
 import { isServiceOrAdmin, isServiceOrAdminOrOwnedAddress } from '../util/ownedAddressOrAdmin'
+
 import { ApiService } from './ApiService'
 
-const LOG = log('PaymentProfilesApiService')
+const getLog = (config: Config): Logger => new Logger('PaymentProfilesApiService', config.logLevel)
 
 export default class PaymentProfilesApiService extends ApiService<
   PaymentProfilesApiServiceHandler
 > {
-  namespace = "profile"
-  routes = {
-    "POST /add-profile/:key": "doAddProfileKey",
-    "POST /": "doCreatePaymentProfile",
-    "POST /:id": "doGetPaymentProfileById",
-    "POST /user/:user": "doGetPaymentProfileByUser"
+  public namespace: string = 'profile'
+  public routes: any = {
+    'GET /:id': 'doGetPaymentProfileById',
+    'GET /user/:user': 'doGetPaymentProfileByUser',
+    'POST /': 'doCreatePaymentProfile',
+    'POST /add-profile/:key': 'doAddProfileKey',
   }
-  handler = PaymentProfilesApiServiceHandler
-  dependencies = {
-    paymentProfilesService: "PaymentProfilesService"
+  public handler: any = PaymentProfilesApiServiceHandler
+  public dependencies: any = {
+    config: 'Config',
+    paymentProfilesService: 'PaymentProfilesService',
   }
 }
 
 class PaymentProfilesApiServiceHandler {
-  paymentProfilesService: PaymentProfilesService
+  public paymentProfilesService: PaymentProfilesService
+  private config: Config
 
-  async doAddProfileKey(req: express.Request, res: express.Response) {
+  public async doAddProfileKey(req: express.Request, res: express.Response): Promise<any> {
     if (!isServiceOrAdmin(req)) {
       res.status(403)
-      return res.send({ error: "Admin role not detected on request." })
+      return res.send({ error: 'Admin role not detected on request.' })
     }
 
     const { key } = req.params
     const { addresses } = req.body
     if (
       !key ||
-      !Number.isInteger(parseInt(key)) ||
+      !Number.isInteger(parseInt(key, 10)) ||
       !addresses ||
       !isArray(addresses)
     ) {
-      logApiRequestError(LOG, req)
+      logApiRequestError(getLog(this.config), req)
       return res.sendStatus(400)
     }
 
-    await this.paymentProfilesService.doAddProfileKey(parseInt(key), addresses)
+    await this.paymentProfilesService.doAddProfileKey(parseInt(key, 10), addresses)
     return res.sendStatus(200)
   }
 
-  async doCreatePaymentProfile(req: express.Request, res: express.Response) {
+  public async doCreatePaymentProfile(req: express.Request, res: express.Response): Promise<any> {
     if (!isServiceOrAdmin(req)) {
       res.status(403)
-      return res.send({ error: "Admin role not detected on request." })
+      return res.send({ error: 'Admin role not detected on request.' })
     }
 
     const {
       minimumMaintainedCollateralWei,
       minimumMaintainedCollateralToken,
       amountToCollateralizeWei,
-      amountToCollateralizeToken
+      amountToCollateralizeToken,
     } = req.body
 
     // TODO: right now the hub does not maintain collateral for wei
@@ -72,7 +75,7 @@ class PaymentProfilesApiServiceHandler {
       // !amountToCollateralizeWei ||
       !amountToCollateralizeToken
     ) {
-      logApiRequestError(LOG, req)
+      logApiRequestError(getLog(this.config), req)
       return res.sendStatus(400)
     }
 
@@ -81,35 +84,35 @@ class PaymentProfilesApiServiceHandler {
         !toBN(minimumMaintainedCollateralWei).isZero()) ||
       (amountToCollateralizeWei && !toBN(amountToCollateralizeWei).isZero())
     ) {
-      logApiRequestError(LOG, req)
+      logApiRequestError(getLog(this.config), req)
       return res.sendStatus(400)
     }
 
     const config = await this.paymentProfilesService.doCreatePaymentProfile({
-      minimumMaintainedCollateralWei,
-      minimumMaintainedCollateralToken,
+      amountToCollateralizeToken,
       amountToCollateralizeWei,
-      amountToCollateralizeToken
+      minimumMaintainedCollateralToken,
+      minimumMaintainedCollateralWei,
     })
 
     return res.send({ paymentProfileId: config.id })
   }
 
-  async doGetPaymentProfileById(req: express.Request, res: express.Response) {
+  public async doGetPaymentProfileById(req: express.Request, res: express.Response): Promise<any> {
     if (!isServiceOrAdmin(req)) {
       res.status(403)
-      return res.send({ error: "Admin role not detected on request." })
+      return res.send({ error: 'Admin role not detected on request.' })
     }
 
     const { id } = req.params
 
-    if (!id || !Number.isInteger(parseInt(id))) {
-      logApiRequestError(LOG, req)
+    if (!id || !Number.isInteger(parseInt(id, 10))) {
+      logApiRequestError(getLog(this.config), req)
       return res.sendStatus(400)
     }
 
     const config = await this.paymentProfilesService.doGetPaymentProfileById(
-      parseInt(id)
+      parseInt(id, 10),
     )
 
     if (!config) {
@@ -120,20 +123,22 @@ class PaymentProfilesApiServiceHandler {
     return res.send(config)
   }
 
-  async doGetPaymentProfileByUser(req: express.Request, res: express.Response) {
+  public async doGetPaymentProfileByUser(
+    req: express.Request, res: express.Response,
+  ): Promise<any> {
     if (!isServiceOrAdminOrOwnedAddress(req)) {
-      logApiRequestError(LOG, req)
+      logApiRequestError(getLog(this.config), req)
       return res.sendStatus(400)
     }
     const { user } = req.params
-    
+
     if (!user) {
-      logApiRequestError(LOG, req)
+      logApiRequestError(getLog(this.config), req)
       return res.sendStatus(400)
     }
 
     const config = await this.paymentProfilesService.doGetPaymentProfileByUser(
-      user
+      user,
     )
 
     if (!config) {

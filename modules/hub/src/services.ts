@@ -4,7 +4,6 @@ import Web3 from 'web3'
 
 import { default as ChannelManagerABI } from './abi/ChannelManager'
 import AuthApiService from './api/AuthApiService'
-import BrandingApiService from './api/BrandingApiService'
 import ChannelsApiService from './api/ChannelsApiService'
 import ConfigApiService from './api/ConfigApiService'
 import ExchangeRateApiService from './api/ExchangeRateApiService'
@@ -17,15 +16,9 @@ import { ApiServer } from './ApiServer'
 import ChainsawService from './ChainsawService'
 import ChannelsService from './ChannelsService'
 import { CloseChannelService } from './CloseChannelService'
-import { CoinPaymentsApiClient } from './coinpayments/CoinPaymentsApiClient'
-import { CoinPaymentsApiService } from './coinpayments/CoinPaymentsApiService'
-import { CoinPaymentsDao } from './coinpayments/CoinPaymentsDao'
-import { CoinPaymentsDepositPollingService } from './coinpayments/CoinPaymentsDepositPollingService'
-import { CoinPaymentsService } from './coinpayments/CoinPaymentsService'
 import Config from './Config'
 import { Container, Context, PartialServiceDefinitions, Registry } from './Container'
 import { ChannelManager } from './contract/ChannelManager'
-import { MemoryCRAuthManager } from './CRAuthManager'
 import { CustodialPaymentsApiService } from './custodial-payments/CustodialPaymentsApiService'
 import { CustodialPaymentsDao } from './custodial-payments/CustodialPaymentsDao'
 import { CustodialPaymentsService } from './custodial-payments/CustodialPaymentsService'
@@ -47,7 +40,6 @@ import { PostgresWithdrawalsDao } from './dao/WithdrawalsDao'
 import { default as DBEngine, PgPoolService, PostgresDBEngine } from './DBEngine'
 import ExchangeRateService from './ExchangeRateService'
 import { default as GasEstimateService } from './GasEstimateService'
-import { DefaultAuthHandler } from './middleware/AuthHandler'
 import { NgrokService } from './NgrokService'
 import { OnchainTransactionService } from './OnchainTransactionService'
 import { OptimisticPaymentsService } from './OptimisticPaymentsService'
@@ -55,6 +47,7 @@ import PaymentProfilesService from './PaymentProfilesService'
 import PaymentsService from './PaymentsService'
 import { getRedisClient, RedisClient } from './RedisClient'
 import { SignerService } from './SignerService'
+import { SubscriptionServer } from './SubscriptionServer'
 import ThreadsService from './ThreadsService'
 
 export default function defaultRegistry(otherRegistry?: Registry): Registry {
@@ -68,6 +61,18 @@ export const serviceDefinitions: PartialServiceDefinitions = {
   // Singletons
   //
 
+  ApiServer: {
+    factory: (container: Container) => new ApiServer(container),
+    dependencies: ['Container'],
+    isSingleton: true,
+  },
+
+  SubscriptionServer: {
+    dependencies: ['Config'],
+    factory: (config: Config): SubscriptionServer => new SubscriptionServer(config),
+    isSingleton: true,
+  },
+
   PgPoolService: {
     factory: (config: Config) => new PgPoolService(config),
     dependencies: ['Config'],
@@ -75,14 +80,18 @@ export const serviceDefinitions: PartialServiceDefinitions = {
   },
 
   GasEstimateService: {
-    factory: (dao: GasEstimateDao) => new GasEstimateService(dao),
-    dependencies: ['GasEstimateDao'],
+    dependencies: ['Config', 'GasEstimateDao', 'SubscriptionServer'],
+    factory: (
+      config: Config, dao: GasEstimateDao, subscriptions: SubscriptionServer,
+    ): GasEstimateService => new GasEstimateService(config, dao, subscriptions),
     isSingleton: true,
   },
 
   ExchangeRateService: {
-    factory: (dao: ExchangeRateDao) => new ExchangeRateService(dao),
-    dependencies: ['ExchangeRateDao'],
+    dependencies: ['Config', 'ExchangeRateDao', 'SubscriptionServer'],
+    factory: (
+      config: Config, dao: ExchangeRateDao, subscriptions: SubscriptionServer,
+    ): ExchangeRateService => new ExchangeRateService(config, dao, subscriptions),
     isSingleton: true,
   },
 
@@ -144,24 +153,16 @@ export const serviceDefinitions: PartialServiceDefinitions = {
     isSingleton: true,
   },
 
-  ApiServer: {
-    factory: (container: Container) => new ApiServer(container),
-    dependencies: ['Container'],
-    isSingleton: true,
-  },
-
   ApiServerServices: {
     factory: () => [
       GasEstimateApiService,
       FeatureFlagsApiService,
       ChannelsApiService,
-      BrandingApiService,
       AuthApiService,
       ConfigApiService,
       ExchangeRateApiService,
       ThreadsApiService,
       PaymentsApiService,
-      CoinPaymentsApiService,
       CustodialPaymentsApiService,
       PaymentProfilesApiService,
     ],
@@ -175,22 +176,18 @@ export const serviceDefinitions: PartialServiceDefinitions = {
       onchainTransactionDao: OnchainTransactionsDao,
       db: DBEngine,
       signerService: SignerService,
-      container: Container
-    ) => new OnchainTransactionService(web3, gasEstimateDao, onchainTransactionDao, db, signerService, container),
+      config: Config,
+      container: Container,
+    ) => new OnchainTransactionService(web3, gasEstimateDao, onchainTransactionDao, db, signerService, config, container),
     dependencies: [
       'Web3',
       'GasEstimateDao',
       'OnchainTransactionsDao',
       'DBEngine',
       'SignerService',
-      'Container'
+      'Config',
+      'Container',
     ],
-    isSingleton: true,
-  },
-
-  CRAuthManager: {
-    factory: () => new MemoryCRAuthManager(),
-    dependencies: [],
     isSingleton: true,
   },
 
@@ -215,23 +212,6 @@ export const serviceDefinitions: PartialServiceDefinitions = {
     isSingleton: true,
   },
 
-  // TODO: Make sure this is started when the hub starts
-  CoinPaymentsDepositPollingService: {
-    factory: (
-      config: Config,
-      db: DBEngine,
-      service: CoinPaymentsService,
-      dao: CoinPaymentsDao,
-    ) => new CoinPaymentsDepositPollingService(config, db, service, dao),
-    dependencies: [
-      'Config',
-      'DBEngine',
-      'CoinPaymentsService',
-      'CoinPaymentsDao',
-    ],
-    isSingleton: true,
-  },
-
   //
   // Factories
   //
@@ -252,7 +232,7 @@ export const serviceDefinitions: PartialServiceDefinitions = {
   },
 
   GlobalSettingsDao: {
-    factory: (db: DBEngine<Client>) => 
+    factory: (db: DBEngine<Client>) =>
       new PostgresGlobalSettingsDao(db),
     dependencies: ['DBEngine']
   },
@@ -281,9 +261,9 @@ export const serviceDefinitions: PartialServiceDefinitions = {
   },
 
   DBEngine: {
-    factory: (pool: PgPoolService, context: Context) =>
-      new PostgresDBEngine(pool, context),
-    dependencies: ['PgPoolService', 'Context'],
+    factory: (config: Config, pool: PgPoolService, context: Context) =>
+      new PostgresDBEngine(config, pool, context),
+    dependencies: ['Config', 'PgPoolService', 'Context'],
   },
 
   DisbursementDao: {
@@ -320,11 +300,6 @@ export const serviceDefinitions: PartialServiceDefinitions = {
   FeatureFlagsDao: {
     factory: (client: DBEngine<Client>) => new PostgresFeatureFlagsDao(client),
     dependencies: ['DBEngine'],
-  },
-
-  AuthHandler: {
-    factory: (config: Config) => new DefaultAuthHandler(config),
-    dependencies: ['Config'],
   },
 
   Context: {
@@ -411,26 +386,29 @@ export const serviceDefinitions: PartialServiceDefinitions = {
 
   OptimisticPaymentsService: {
     factory: (
+      config: Config,
       db: DBEngine,
       opPaymentDao: OptimisticPaymentDao,
       channelsDao: ChannelsDao,
       paymentsService: PaymentsService,
-      channelsService: ChannelsService
+      channelsService: ChannelsService,
     ) => new OptimisticPaymentsService(
-      db, 
-      opPaymentDao, 
-      channelsDao, 
+      config,
+      db,
+      opPaymentDao,
+      channelsDao,
       paymentsService,
-      channelsService
+      channelsService,
     ),
     dependencies: [
+      'Config',
       'DBEngine',
       'OptimisticPaymentDao',
       'ChannelsDao',
       'PaymentsService',
-      'ChannelsService'
+      'ChannelsService',
     ],
-    isSingleton: true
+    isSingleton: true,
   },
 
   ChannelsService: {
@@ -449,7 +427,6 @@ export const serviceDefinitions: PartialServiceDefinitions = {
       db: DBEngine,
       config: Config,
       contract: ChannelManager,
-      coinPaymentsDao: CoinPaymentsDao,
       paymentProfilesService: PaymentProfilesService
     ) =>
       new ChannelsService(
@@ -467,7 +444,6 @@ export const serviceDefinitions: PartialServiceDefinitions = {
         db,
         config,
         contract,
-        coinPaymentsDao,
         paymentProfilesService,
       ),
     dependencies: [
@@ -485,7 +461,6 @@ export const serviceDefinitions: PartialServiceDefinitions = {
       'DBEngine',
       'Config',
       'ChannelManagerContract',
-      'CoinPaymentsDao',
       'PaymentProfilesService'
     ],
   },
@@ -507,39 +482,6 @@ export const serviceDefinitions: PartialServiceDefinitions = {
       'Config',
       'GlobalSettingsDao'
     ],
-  },
-
-  CoinPaymentsApiClient: {
-    factory: (config: Config, ngrok: NgrokService) => new CoinPaymentsApiClient(config, ngrok),
-    dependencies: ['Config', 'NgrokService'],
-  },
-
-  CoinPaymentsService: {
-    factory: (
-      config: Config,
-      api: CoinPaymentsApiClient,
-      dao: CoinPaymentsDao,
-      db: DBEngine,
-      channelsService: ChannelsService,
-      channelDao: ChannelsDao,
-      exchangeRateDao: ExchangeRateDao,
-    ) => new CoinPaymentsService(config, api, dao, db, channelsService, channelDao, exchangeRateDao),
-    dependencies: [
-      'Config',
-      'CoinPaymentsApiClient',
-      'CoinPaymentsDao',
-      'DBEngine',
-      'ChannelsService',
-      'ChannelsDao',
-      'ExchangeRateDao',
-    ],
-  },
-
-  CoinPaymentsDao: {
-    factory: (
-      db: DBEngine,
-    ) => new CoinPaymentsDao(db),
-    dependencies: ['DBEngine'],
   },
 
   CustodialPaymentsDao: {
@@ -574,13 +516,16 @@ export const serviceDefinitions: PartialServiceDefinitions = {
 
   PaymentProfilesService: {
     factory: (
+      config: Config,
       paymentsProfileDao: PaymentProfilesDao,
       db: DBEngine,
     ) => new PaymentProfilesService(
+      config,
       paymentsProfileDao,
       db,
     ),
     dependencies: [
+      'Config',
       'PaymentProfilesDao',
       'DBEngine'
     ]

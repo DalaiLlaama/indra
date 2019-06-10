@@ -1,43 +1,53 @@
 import * as express from 'express'
 
-import { ApiService } from './ApiService'
-
 import Config from '../Config'
-import log from '../util/log'
 
-const LOG = log('ConfigApiService')
+import { ApiService } from './ApiService'
+import { isServiceOrAdmin } from '../util/ownedAddressOrAdmin';
+import { isBN } from '../util';
 
 export default class ConfigApiService extends ApiService<ConfigApiServiceHandler> {
-  namespace = 'config'
-  routes = {
+  public namespace: string = 'config'
+  public routes: any = {
     'GET /': 'doGetConfig',
+    'GET /admin': 'doGetAdminConfig'
   }
-  handler = ConfigApiServiceHandler
-  dependencies = {
+  public handler: any = ConfigApiServiceHandler
+  public dependencies: any = {
     'config': 'Config',
   }
 }
 
 class ConfigApiServiceHandler {
-  config: Config
+  public config: Config
 
-  doGetConfig(req: express.Request, res: express.Response) {
-    const {
-      channelManagerAddress,
-      hotWalletAddress,
-      tokenContractAddress,
-      ethRpcUrl,
-      ethNetworkId,
-      beiMaxCollateralization,
-    } = this.config
+  // unauthed endpoint
+  public doGetConfig(req: express.Request, res: express.Response): any {
     return res.send({
-      channelManagerAddress,
-      hubWalletAddress: hotWalletAddress,
-      tokenAddress: tokenContractAddress,
-      ethRpcUrl,
-      ethNetworkId,
-      beiMaxCollateralization: beiMaxCollateralization.toString(),
+      contractAddress: this.config.channelManagerAddress,
+      ethChainId: this.config.ethNetworkId,
+      hubAddress: this.config.hotWalletAddress,
+      maxCollateralization: this.config.beiMaxCollateralization.toString(),
+      tokenAddress: this.config.tokenContractAddress,
     })
+  }
+
+  // admin only config
+  public doGetAdminConfig(req: express.Request, res: express.Response): any {
+    if (!isServiceOrAdmin(req)) {
+      res.status(403)
+      return res.send({ error: 'Admin role not detected on request.' })
+    }
+    // cast bn values to string
+    let response = {}
+    for (let key in this.config) {
+      if (isBN(this.config[key])) {
+        response[key] = this.config[key].toString()
+      } else {
+        response[key] = this.config[key]
+      }
+    }
+    return res.send(response)
   }
 
 }

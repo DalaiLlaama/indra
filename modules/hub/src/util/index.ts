@@ -1,19 +1,25 @@
-import * as eth from 'ethers'
+import { ethers as eth } from 'ethers'
 import { BigNumber } from 'ethers/utils'
 
-// BN Helper wrapers
+export { Logger, logApiRequestError } from './logger'
+
+const { Zero, MaxUint256 } = eth.constants
+const { arrayify, bigNumberify, isHexString, parseEther, formatEther } = eth.utils
+
 export type BN = BigNumber
 
 export const isBN = BigNumber.isBigNumber
 
 export const toBN = (n: string|number|BN): BN =>
-  eth.utils.bigNumberify(n.toString())
+  bigNumberify(n.toString())
 
 export const toWei = (n: string|number|BN): BN =>
-  eth.utils.parseEther(n.toString())
+  parseEther(n.toString())
+
+export const fromWei = formatEther
 
 export const weiToToken = (wei: BN, tokenPerEth: string): BN =>
-  toBN(eth.utils.formatEther(toWei(tokenPerEth).mul(wei)).replace(/\.[0-9]*$/, ''))
+  toBN(formatEther(toWei(tokenPerEth).mul(wei)).replace(/\.[0-9]*$/, ''))
 
 export const tokenToWei = (token: BN, tokenPerEth: string): BN =>
   toWei(token).div(toWei(tokenPerEth))
@@ -24,7 +30,10 @@ export const maxBN = (lon: BN[]): BN =>
   )
 
 export const minBN = (lon: BN[]): BN =>
-  lon.reduce((min, current) => min.lt(current) ? min : current, eth.constants.MaxUint256)
+  lon.reduce((min: BN, current: BN): BN => min.lt(current) ? min : current, MaxUint256)
+
+export const isValidHex = (hex: string, length: number): boolean =>
+  isHexString(hex) && arrayify(hex).length === length
 
 
 /**
@@ -163,7 +172,6 @@ export class Lock implements PromiseLike<void> {
  *     @synchronized('fooLock')
  *     async foo(msg: string) {
  *       await sleep(1000)
- *       console.log('msg:', msg)
  *     }
  *   }
  *
@@ -200,7 +208,6 @@ export function synchronized(lockName: string) {
  *   if (err) {
  *     return `Oh no there was an error: ${err}`
  *   }
- *   console.log('The result:', res)
  *
  * The result is also an object with `res` and `err` fields:
  *
@@ -208,7 +215,6 @@ export function synchronized(lockName: string) {
  *   if (someResult.err) {
  *     return `Oh no there was an error: ${someResult.err}`
  *   }
- *   console.log('The result:', someResult.res)
  *
  */
 export type MaybeRes<T> = [T, any] & { res: T, err: any }

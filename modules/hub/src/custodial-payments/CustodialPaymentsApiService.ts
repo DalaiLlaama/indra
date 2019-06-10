@@ -3,14 +3,13 @@ import { Request, Response } from 'express'
 
 import { ApiService } from '../api/ApiService'
 import Config from '../Config'
-import { BN, safeJson, toBN } from '../util'
-import log, { logApiRequestError } from '../util/log'
+import { BN, logApiRequestError, Logger, safeJson, toBN } from '../util'
 import { getUserFromRequest } from '../util/request'
 
 import { CustodialPaymentsDao } from './CustodialPaymentsDao'
 import { CustodialPaymentsService } from './CustodialPaymentsService'
 
-const LOG = log('CustodialPaymentsApiService')
+const getLog = (config: Config): Logger => new Logger('CustodialPaymentsService', config.logLevel)
 
 function getAttr<T, K extends keyof T>(obj: T, attr: K): T[K] {
   if (!(attr in obj))
@@ -28,7 +27,9 @@ getAttr.big = <T, K extends keyof T>(obj: T, attr: K): BN => {
   }
 }
 
-export class CustodialPaymentsApiService extends ApiService<CustodialPaymentsApiServiceHandler> {
+export class CustodialPaymentsApiService extends ApiService<
+  CustodialPaymentsApiServiceHandler
+> {
   namespace = 'custodial'
   routes = {
     'POST /withdrawals': 'doCreateWithdraw',
@@ -39,12 +40,11 @@ export class CustodialPaymentsApiService extends ApiService<CustodialPaymentsApi
   }
   handler = CustodialPaymentsApiServiceHandler
   dependencies = {
-    'config': 'Config',
-    'dao': 'CustodialPaymentsDao',
-    'service': 'CustodialPaymentsService',
+    config: 'Config',
+    dao: 'CustodialPaymentsDao',
+    service: 'CustodialPaymentsService',
   }
 }
-
 
 class CustodialPaymentsApiServiceHandler {
   config: Config
@@ -52,23 +52,29 @@ class CustodialPaymentsApiServiceHandler {
   service: CustodialPaymentsService
 
   async doGetBalance(req: Request, res: Response) {
-    return res.json(connext.convert.CustodialBalanceRow("str", 
-      await this.dao.getCustodialBalance(getUserFromRequest(req))
-    ))
+    return res.json(
+      connext.convert.CustodialBalanceRow(
+        'str',
+        await this.dao.getCustodialBalance(getUserFromRequest(req)),
+      ),
+    )
   }
 
   async doCreateWithdraw(req: Request, res: Response) {
-    let withdrawal, user, recipient, amountToken
+    let withdrawal
+    let user
+    let recipient
+    let amountToken
+
     try {
-      user = getAttr.address(req.session!, 'address')
+      user = req.address
       recipient = getAttr.address(req.body, 'recipient')
       amountToken = getAttr.big(req.body, 'amountToken')
     } catch (e) {
       // send error response, invalid params
-      logApiRequestError(LOG, req)
+      logApiRequestError(getLog(this.config), req)
       return res.sendStatus(400)
     }
-
 
     try {
       withdrawal = await this.service.createCustodialWithdrawal({
@@ -77,27 +83,29 @@ class CustodialPaymentsApiServiceHandler {
         amountToken,
       })
     } catch (e) {
-      LOG.error(`Error creating custodial withdrawal: {e}`, { e })
+      getLog(this.config).error(`Error creating custodial withdrawal: ${e}`)
       return res.sendStatus(400)
     }
-    
 
-    return res.json(connext.convert.CustodialWithdrawalRow("str",
-      withdrawal
-    ))
+    return res.json(connext.convert.CustodialWithdrawalRow('str', withdrawal))
   }
 
   async doGetWithdrawals(req: Request, res: Response) {
     const rows = await this.dao.getCustodialWithdrawals(getUserFromRequest(req))
-    return res.json(rows.map(r => connext.convert.CustodialWithdrawalRow("str", r)))
+    return res.json(
+      rows.map(r => connext.convert.CustodialWithdrawalRow('str', r)),
+    )
   }
 
   async doGetWithdrawal(req: Request, res: Response) {
-    return res.json(connext.convert.CustodialWithdrawalRow("str", 
-      await this.dao.getCustodialWithdrawal(
-        getAttr.address(req.session!, 'address'),
-        getAttr(req.params, 'withdrawalId'),
-      ))
+    return res.json(
+      connext.convert.CustodialWithdrawalRow(
+        'str',
+        await this.dao.getCustodialWithdrawal(
+          getAttr.address(req, 'address'),
+          getAttr(req.params, 'withdrawalId'),
+        ),
+      ),
     )
   }
 }

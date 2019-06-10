@@ -9,14 +9,17 @@ import * as eth from 'ethers'
 
 import Config from '../Config'
 import { PaymentMetaDao } from '../dao/PaymentMetaDao'
-import { assert, getTestRegistry, TestApiServer } from '../testing'
+import { assert, authHeaders, getTestConfig, getTestRegistry, TestApiServer } from '../testing'
 import { channelNextState, channelUpdateFactory, tokenVal } from '../testing/factories'
 import { testChannelManagerAddress, testHotWalletAddress } from '../testing/mocks'
 import { mkAddress, mkSig } from '../testing/stateUtils'
 import { toWei } from '../util'
 
+const logLevel = 0
+
 describe('PaymentsApiService', () => {
   const registry = getTestRegistry({
+    Config: getTestConfig({ logLevel }),
     'Web3': {
       eth: {
         Contract: () => ({}),
@@ -41,6 +44,7 @@ describe('PaymentsApiService', () => {
 
     const res = await app.withUser(chan.user).request
       .post('/payments/purchase')
+      .set(authHeaders).set('x-address', chan.user)
       .send({
         meta: {},
         payments: [
@@ -92,6 +96,7 @@ describe('PaymentsApiService', () => {
 
     const res = await app.withUser(sender.user).request
       .post('/payments/purchase')
+      .set(authHeaders).set('x-address', sender.user)
       .send({
         meta: {},
         payments: [
@@ -141,6 +146,7 @@ describe('PaymentsApiService', () => {
 
     const res = await app.withUser(sender.user).request
       .post('/payments/purchase')
+      .set(authHeaders).set('x-address', sender.user)
       .send({
         meta: {},
         payments: [
@@ -188,6 +194,7 @@ describe('PaymentsApiService', () => {
 
     const res = await app.withUser(chan.user).request
       .post('/payments/purchase')
+      .set(authHeaders).set('x-address', chan.user)
       .send({
         meta: {},
         payments: [
@@ -243,6 +250,7 @@ describe('PaymentsApiService', () => {
     // add linked payment to the db
     await app.withUser(senderChan.user).request
     .post('/payments/purchase')
+    .set(authHeaders).set('x-address', senderChan.user)
     .send({
       meta: {},
       payments: [
@@ -270,13 +278,12 @@ describe('PaymentsApiService', () => {
       ] as PurchasePayment[]
     })
 
-    console.log('linked payment inserted into db')
-
     const redeemer = redeemerChan.user.toLowerCase()
     const res = await app.withUser(redeemer).request
       .post(`/payments/redeem/${redeemer}`)
+      .set(authHeaders).set('x-address', redeemer)
       .send({ 
-        secret: "sadlkj",
+        secret: 'sadlkj',
         lastChanTx: redeemerChan.state.txCountGlobal,
         lastThreadUpdateId: 0,
       })
@@ -296,7 +303,7 @@ describe('PaymentsApiService', () => {
       },
       type: 'PT_LINK',
       meta: {
-        secret: "sadlkj"
+        secret: 'sadlkj'
       }
     })
 
@@ -310,7 +317,7 @@ describe('PaymentsApiService', () => {
       },
       type: 'PT_LINK',
       meta: {
-        secret: "sadlkj"
+        secret: 'sadlkj'
       }
     })
   })
@@ -334,7 +341,7 @@ describe('PaymentsApiService', () => {
       contractAddress: testChannelManagerAddress,
       sender: senderChannel.user,
       receiver: receiverChannel.user,
-      sigA: mkSig("0xa"),
+      sigA: mkSig('0xa'),
       threadId: 0,
       txCount: 0
     }
@@ -355,6 +362,7 @@ describe('PaymentsApiService', () => {
 
     const res = await app.withUser(senderChannel.user).request
       .post('/payments/purchase')
+      .set(authHeaders).set('x-address', senderChannel.user)
       .send({
         meta: {},
         payments: [{

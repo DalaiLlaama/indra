@@ -39,7 +39,7 @@ export interface IChannelManager {
     proof: any,
   ): Promise<Transaction>
   startExitWithUpdate(state: ChannelState): Promise<Transaction>
-  userAuthorizedUpdate(state: ChannelState): Promise<Transaction>
+  userAuthorizedUpdate(state: ChannelState, overrides?: any): Promise<Transaction>
 }
 
 export class ChannelManager implements IChannelManager {
@@ -52,7 +52,7 @@ export class ChannelManager implements IChannelManager {
   private defaultSendArgs: any = { value: 0 }
   private provider: Provider
 
-  public constructor(wallet: Wallet, address: string, gasMultiple: number) {
+  public constructor(wallet: Wallet, address: string, gasMultiple: number = 1.5) {
     this.address = address
     // NOTE: doing wallet.provider, we can still create this
     // and have sendTransaction in the wallet return
@@ -78,7 +78,7 @@ export class ChannelManager implements IChannelManager {
     return events
   }
 
-  public async userAuthorizedUpdate(state: ChannelState): Promise<any> {
+  public async userAuthorizedUpdate(state: ChannelState, overrides: any = {}): Promise<any> {
     const args = [
       state.recipient,
       [
@@ -112,6 +112,7 @@ export class ChannelManager implements IChannelManager {
     ]
     return this._send('userAuthorizedUpdate', args, {
       ...this.defaultSendArgs,
+      ...overrides,
       value: eth.utils.bigNumberify(state.pendingDepositWeiUser),
     })
   }
