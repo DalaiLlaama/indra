@@ -158,6 +158,7 @@ export abstract class ConnextChannel extends EventEmitter {
     this.opts = opts
     this.utils = new Utils()
     this.internal = this as any
+    this.store = this.internal.store
   }
 
   // ******************************
