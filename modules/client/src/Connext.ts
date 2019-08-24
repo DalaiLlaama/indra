@@ -146,6 +146,7 @@ const isSuccinctWithdrawal = (
 export abstract class ConnextChannel extends EventEmitter {
   public opts: IConnextChannelInternalOptions
   public StateGenerator?: StateGenerator
+  public store?: ConnextStore
   public Utils?: Utils // class constructor (todo: rm?)
   public utils: Utils // instance
   public Validator?: Validator
