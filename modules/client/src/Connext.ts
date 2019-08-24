@@ -146,7 +146,6 @@ const isSuccinctWithdrawal = (
 export abstract class ConnextChannel extends EventEmitter {
   public opts: IConnextChannelInternalOptions
   public StateGenerator?: StateGenerator
-  public store?: ConnextStore
   public Utils?: Utils // class constructor (todo: rm?)
   public utils: Utils // instance
   public Validator?: Validator
@@ -158,7 +157,6 @@ export abstract class ConnextChannel extends EventEmitter {
     this.opts = opts
     this.utils = new Utils()
     this.internal = this as any
-    this.store = this.internal.store
   }
 
   // ******************************
@@ -189,6 +187,10 @@ export abstract class ConnextChannel extends EventEmitter {
   // ******************************
   // **** CORE CHANNEL METHODS ****
   // ******************************
+
+  public async getState(): Promise<any> {
+    return this.internal.store.getState()
+  }
 
   public async buy(purchase: PartialPurchaseRequest): Promise<{ purchaseId: string }> {
     return this.internal.buyController.buy(purchase)
