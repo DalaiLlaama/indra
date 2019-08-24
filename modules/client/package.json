@@ -25,6 +25,7 @@
   "dependencies": {
     "bluebird": "^3.5.3",
     "ethers": "^4.0.27",
+    "events": "^3.0.0",
     "human-standard-token-abi": "^2.0.0",
     "isomorphic-ws": "^4.0.1",
     "redux": "^4.0.1",
