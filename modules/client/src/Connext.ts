@@ -75,7 +75,6 @@ export interface IConnextChannelOptions {
   privateKey?: string
   user?: string
   externalWallet?: any,
-  web3Provider?: eth.providers.Web3Provider
   loadState?(): any
   safeSignHook?(state: ChannelState | ThreadState): Promise<string> // NOTE: only a placeholder
   saveState?(state: any): any
