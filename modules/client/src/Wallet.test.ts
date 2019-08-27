@@ -1,5 +1,4 @@
 import { ethers as eth } from 'ethers'
-import Web3 from 'web3'
 
 import { BN } from './lib'
 import { address, assert, ethUrl, mnemonic, privateKey } from './testing'
@@ -8,7 +7,6 @@ import { Wallet } from './Wallet'
 
 const hubUrl: string = ''
 const utils: Utils = new Utils()
-const web3Provider: any = new Web3.providers.HttpProvider(ethUrl)
 
 ////////////////////////////////////////
 // Helper Functions
@@ -51,23 +49,12 @@ describe('Wallet', () => {
     testSignMessage(new Wallet({ hubUrl, mnemonic }))
   })
 
-  it('should sign messages properly with web3', async () => {
-    const web3Address = (await (new Web3(web3Provider)).eth.getAccounts())[0].toLowerCase()
-    testSignMessage(new Wallet({ hubUrl, user: web3Address, web3Provider }))
-  })
-
   it('should sign transactions properly with a private key', async () => {
     testSendTransaction(new Wallet({ hubUrl, ethUrl, privateKey }))
   })
 
   it('should sign transactions properly with a mnemonic', async () => {
     testSendTransaction(new Wallet({ hubUrl, ethUrl, mnemonic }))
-  })
-
-  // Ganache does not support the eth_signTransaction method
-  it.skip('should sign transactions properly with web3', async () => {
-    const web3Address = (await (new Web3(web3Provider)).eth.getAccounts())[0].toLowerCase()
-    testSignMessage(new Wallet({ hubUrl, user: web3Address, web3Provider }))
   })
 
   it('should throw an error if not given a signing method', async () => {

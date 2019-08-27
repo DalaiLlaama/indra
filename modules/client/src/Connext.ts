@@ -75,7 +75,6 @@ export interface IConnextChannelOptions {
   privateKey?: string
   user?: string
   externalWallet?: any,
-  web3Provider?: eth.providers.Web3Provider
   loadState?(): any
   safeSignHook?(state: ChannelState | ThreadState): Promise<string> // NOTE: only a placeholder
   saveState?(state: any): any
@@ -188,6 +187,10 @@ export abstract class ConnextChannel extends EventEmitter {
   // ******************************
   // **** CORE CHANNEL METHODS ****
   // ******************************
+
+  public async getState(): Promise<any> {
+    return this.internal.store.getState()
+  }
 
   public async buy(purchase: PartialPurchaseRequest): Promise<{ purchaseId: string }> {
     return this.internal.buyController.buy(purchase)

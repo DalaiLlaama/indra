@@ -1,5 +1,3 @@
-import { isArray, isNullOrUndefined } from 'util'
-
 import { BN, isBN, toBN } from './lib'
 import { ethers } from 'ethers';
 
@@ -656,7 +654,7 @@ export const makeEventVerbose = (
     // if value is a BN, cast to a string
     if (isBN(val)) {
       value = val.toString()
-    } else if (isArray(val) && isBN(val[0])) {
+    } else if (typeof val === 'object' && val[0] && isBN(val[0])) {
       value = val.map((v: any): any => v.toString())
     }
     // if it contains arrays, expand to named
@@ -981,7 +979,7 @@ export const insertDefault = (val: string, obj: any, keys: string[]): any => {
   const adjusted = {} as any
   keys.concat(Object.keys(obj)).map((k: any): any => {
     // check by index and undefined
-    adjusted[k] = (isNullOrUndefined(obj[k]))
+    adjusted[k] = (obj[k] === null || obj[k] === undefined)
       ? val // not supplied set as default val
       : obj[k]
   })
