@@ -78,11 +78,11 @@ export class WithdrawalController extends AbstractController {
     }
 
     // TODO: token withdrawals
-    if (withdrawalStr.weiToSell && toBN(withdrawalStr.weiToSell).lt(channelBN.balanceWeiUser)) {
+    if (withdrawalStr.weiToSell && toBN(withdrawalStr.weiToSell).gt(channelBN.balanceWeiUser)) {
       WithdrawalError(`Cannot sell more wei than exist in your channel.`)
     }
 
-    if (withdrawalStr.withdrawalTokenUser && toBN(withdrawalStr.withdrawalTokenUser).lt(channelBN.balanceTokenUser)) {
+    if (withdrawalStr.withdrawalTokenUser && toBN(withdrawalStr.withdrawalTokenUser).gt(channelBN.balanceTokenUser)) {
       WithdrawalError(`Cannot withdraw more tokens than exist in your channel.`)
     }
 
