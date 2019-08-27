@@ -66,3 +66,8 @@ git push origin master --no-verify
 # Push a new indra release tag
 git tag indra-$indra_version
 git push origin indra-$indra_version --no-verify
+
+# Bring staging up-to-date w master
+git checkout staging
+git merge master
+git push origin staging --no-verify

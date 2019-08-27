@@ -8,7 +8,7 @@ if [[ -n "`git status -s`" ]]
 then echo "Aborting: Make sure your git repo is clean" && exit 1
 fi
 
-if [[ "`pwd | sed 's|.*/\(.*\)|\1|'`" != "indra" ]]
+if [[ ! "`pwd | sed 's|.*/\(.*\)|\1|'`" =~ "indra" ]]
 then echo "Aborting: Make sure you're in the indra project root" && exit 1
 fi
 
