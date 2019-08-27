@@ -103,7 +103,7 @@ class CustodialPaymentsApiServiceHandler {
         'str',
         await this.dao.getCustodialWithdrawal(
           getAttr.address(req, 'address'),
-          getAttr(req.params, 'withdrawalId'),
+          parseInt(getAttr(req.params, 'withdrawalId'), 10),
         ),
       ),
     )
