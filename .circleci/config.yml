@@ -51,15 +51,15 @@ jobs:
       - run:
           command: |
             ssh ubuntu@$STAGING_URL "bash -s" <<EOF
-              git clone https://github.com/ConnextProject/indra.git || true
-              cd indra
+              git clone https://github.com/ConnextProject/indra-legacy.git || true
+              cd indra-legacy
               git fetch
               git reset --hard origin/$CIRCLE_BRANCH
               export INDRA_MODE="staging"
               export INDRA_ETH_NETWORK="rinkeby"
               export INDRA_DOMAINNAME="$STAGING_URL"
               export MAILGUN_API_KEY="$MAILGUN_API_KEY"
-              bash ops/restart.sh prod
+              make restart prod
               docker container prune -f
               docker image ls -q | xargs docker image rm || true
             EOF
@@ -70,28 +70,28 @@ jobs:
       - run:
           command: |
             ssh ubuntu@$RINKEBY_URL "bash -s" <<EOF
-              git clone https://github.com/ConnextProject/indra.git || true
-              cd indra
+              git clone https://github.com/ConnextProject/indra-legacy.git || true
+              cd indra-legacy
               git fetch
               git reset --hard origin/master
               export MAILGUN_API_KEY="$MAILGUN_API_KEY"
               export INDRA_DOMAINNAME="$RINKEBY_URL"
               export INDRA_ETH_NETWORK="rinkeby"
               export INDRA_MODE="live"
-              bash ops/restart.sh prod
+              make restart prod
               docker container prune -f
               docker image ls -q | xargs docker image rm || true
             EOF
             ssh ubuntu@$MAINNET_URL "bash -s" <<EOF
-              git clone https://github.com/ConnextProject/indra.git || true
-              cd indra
+              git clone https://github.com/ConnextProject/indra-legacy.git || true
+              cd indra-legacy
               git fetch
               git reset --hard origin/master
               export INDRA_DOMAINNAME="$MAINNET_URL"
               export INDRA_ETH_NETWORK="mainnet"
               export INDRA_MODE="live"
               export MAILGUN_API_KEY="$MAILGUN_API_KEY"
-              bash ops/restart.sh prod
+              make restart prod
               docker container prune -f
               docker image ls -q | xargs docker image rm || true
             EOF
