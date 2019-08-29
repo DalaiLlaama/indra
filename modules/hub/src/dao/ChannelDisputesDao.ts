@@ -9,7 +9,8 @@ import { OnchainTransactionRow } from '../domain/OnchainTransaction'
 export default interface ChannelDisputesDao {
   create(
     user: string, 
-    reason: string, 
+    reason: string,
+    originatorIsHub: boolean,
     startEventChainsawId?: number, 
     txn?: OnchainTransactionRow,
     disputeEndTime?: number
@@ -31,18 +32,19 @@ export class PostgresChannelDisputesDao implements ChannelDisputesDao {
   /**
    * Create a new instance of a dispute event. This can be initiated with an OnchainTransaction
    * (i.e. hub initiates dispute), or from a chainsaw event (i.e. user initiates dispute).
-   * @param user 
-   * @param reason 
-   * @param startEventChainsawId 
-   * @param txn 
-   * @param disputeEndTime 
+   * @param user
+   * @param reason
+   * @param startEventChainsawId
+   * @param txn
+   * @param disputeEndTime
    */
   public async create(
-    user: string, 
-    reason: string, 
-    startEventChainsawId?: number, 
+    user: string,
+    reason: string,
+    originatorIsHub: boolean,
+    startEventChainsawId?: number,
     txn?: OnchainTransactionRow,
-    disputeEndTime?: number
+    disputeEndTime?: number,
   ): Promise<ChannelDisputeRow> {
     return this.inflateRow(
       await this.db.queryOne(SQL`
@@ -50,22 +52,24 @@ export class PostgresChannelDisputesDao implements ChannelDisputesDao {
           channel_id,
           started_on,
           reason,
+          originator,
           start_event_id,
           onchain_tx_id_start,
           dispute_period_ends
         ) VALUES (
           (
-            SELECT id 
-            FROM _cm_channels 
-            WHERE 
-              "user" = ${user} AND 
+            SELECT id
+            FROM _cm_channels
+            WHERE
+              "user" = ${user} AND
               contract = ${this.config.channelManagerAddress}
           ),
           NOW(),
           ${reason},
+          ${originatorIsHub ? this.config.hotWalletAddress : user},
           ${startEventChainsawId},
           ${txn ? txn.logicalId : null},
-          ${disputeEndTime}
+          ${disputeEndTime ? disputeEndTime : null}
         ) RETURNING *
       `)
     )
@@ -183,7 +187,10 @@ export class PostgresChannelDisputesDao implements ChannelDisputesDao {
       startedOn: row.started_on,
       reason: row.reason,
       onchainTxIdStart: row.onchain_tx_id_start && +row.onchain_tx_id_start,
-      onchainTxIdEmpty: row.onchain_tx_id_empty && +row.onchain_tx_id_empty
+      onchainTxIdEmpty: row.onchain_tx_id_empty && +row.onchain_tx_id_empty,
+      disputePeriodEnds: row.dispute_period_ends && +row.dispute_period_ends,
+      status: row.status,
+      originator: row.originator,
     }
   }
 }

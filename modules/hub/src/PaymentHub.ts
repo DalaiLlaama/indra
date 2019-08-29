@@ -84,11 +84,7 @@ export default class PaymentHub {
   public async startChainsaw(): Promise<void> {
     this.log.info(`Starting ChainsawService`)
     const chainsaw = this.container.resolve<ChainsawService>('ChainsawService')
-    const channelCloser = this.container.resolve<CloseChannelService>('CloseChannelService')
-    await Promise.race([
-      chainsaw.poll(),
-      channelCloser.poll(),
-    ])
+    await chainsaw.poll()
     return new Promise(res => {})
   }
 
@@ -107,6 +103,7 @@ export default class PaymentHub {
     if (!channels) {
       throw new Error(`Must specify addresses of channels to be closed as args`)
     }
+    this.log.info(`Exiting channels: ${channels}`)
     const closeChannelsService = this.container.resolve<CloseChannelService>('CloseChannelService')
     for (const channel of channels) {
       await closeChannelsService.startUnilateralExit(channel, 'Started exit from command line')
@@ -116,6 +113,12 @@ export default class PaymentHub {
   public async processTx(txHash: string) {
     const chainsaw = this.container.resolve<ChainsawService>('ChainsawService')
     await chainsaw.processSingleTx(txHash, true)
+  }
+
+  public async fetchEventsFromBlock(startingBlock: number, endingBlock: number) {
+    const chainsaw = this.container.resolve<ChainsawService>('ChainsawService')
+    this.log.info(`Fetching events from: ${startingBlock} to ${endingBlock}`);
+    await chainsaw.doFetchEventsFromRange(startingBlock, endingBlock);
   }
 
   public async collateralizeChannel(user: string, amount: BN) {

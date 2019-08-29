@@ -1,6 +1,5 @@
 import { assert, expect } from 'chai'
 import { ethers as eth } from 'ethers'
-import Web3 from 'web3'
 
 import { MerkleTree } from './lib'
 import * as testUtils from './testing'
@@ -16,17 +15,8 @@ const mnemonic: string =
 const provider: string = process.env.ETH_RPC_URL || 'http://localhost:8545'
 const utils: Utils = new Utils()
 const wallet: eth.Wallet = eth.Wallet.fromMnemonic(mnemonic)
-let web3: Web3 | undefined
-let web3Address: string
 
 describe('Utils', () => {
-  beforeEach('instantiate wallets with pk and with web3', async () => {
-    // Try to connect to web3 and get an associated address
-    try {
-      web3 = new Web3(new Web3.providers.HttpProvider(provider))
-      web3Address = (await web3.eth.getAccounts())[0]
-    } catch (e) {/* noop */}
-  })
 
   it('should properly recover the signer from the channel state update hash', async () => {
     const hash: string = utils.createChannelStateHash(
@@ -39,16 +29,6 @@ describe('Utils', () => {
         sig: await wallet.signMessage(eth.utils.arrayify(hash)),
         signer: wallet.address,
     }]
-
-    if (web3 && web3Address) {
-      sigs.push({
-        method: 'web3.eth.sign',
-        sig: await web3.eth.sign(hash, web3Address),
-        signer: web3Address,
-      })
-    } else {
-      console.warn(`    Couldn't connect to a web3 provider, skipping web3 signing tests`)
-    }
 
     // recover signers
     for (const s of sigs) {
@@ -70,16 +50,6 @@ describe('Utils', () => {
         signer: wallet.address,
       },
     ]
-
-    if (web3 && web3Address) {
-      sigs.push({
-        method: 'web3.eth.sign',
-        sig: await web3.eth.sign(hash, web3Address),
-        signer: web3Address,
-      })
-    } else {
-      console.warn(`    Couldn't connect to a web3 provider, skipping web3 signing tests`)
-    }
 
     // recover signers
     for (const s of sigs) {
