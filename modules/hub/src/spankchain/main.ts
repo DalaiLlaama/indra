@@ -7,6 +7,7 @@ import { default as Config } from '../Config'
 import PaymentHub from '../PaymentHub'
 import { Logger } from '../util'
 
+debugger;
 const config = Config.fromEnv()
 const log = new Logger('Main', config.logLevel)
 const hub = new PaymentHub(config)
