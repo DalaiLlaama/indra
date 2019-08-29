@@ -1,5 +1,6 @@
 #!/bin/bash
 set -e
+source ./ops/env-vars.sh
 
 function wait_for {
   name=$1
@@ -20,16 +21,21 @@ function wait_for {
   bash ops/wait-for.sh -t 60 $host 2> /dev/null
 }
 
+echo "start:  $POSTGRES_URL"
 wait_for "database" $POSTGRES_URL
-wait_for "db migrations" ${POSTGRES_URL%:*}:5431
+# wait_for "db migrations" ${POSTGRES_URL%:*}:5431
 wait_for "ethprovider" $ETH_RPC_URL
 wait_for "redis" $REDIS_URL
+echo "Done waiting $ETH_NETWORK"
 
 if [[ "$ETH_NETWORK" == "ganache" ]]
 then wait_for "ethprovider migrations" ${ETH_RPC_URL%:*}:8544
 fi
 
-export DATABASE_URL="postgresql://$POSTGRES_USER:`cat $POSTGRES_PASSWORD_FILE`@$POSTGRES_URL/$POSTGRES_DB"
+
+# export DATABASE_URL="postgresql://$POSTGRES_USER:`cat $POSTGRES_PASSWORD_FILE`@$POSTGRES_URL/$POSTGRES_DB"
+
+echo "Node: $NODE_ENV"
 
 if [[ "$NODE_ENV" == "development" ]]
 then

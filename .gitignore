@@ -35,3 +35,8 @@ modules/hub/yarn--**/*
 modules/hub/package-lock.json
 modules/client/package-lock.json
 modules/hub/yarn.lock
+modules/hub/npm-debug.log
+modules/hub/ops/env-vars.sh
+modules/hub/ops/private-key
+modules/hub/ops/private-key-backup
+
