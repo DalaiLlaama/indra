@@ -51,25 +51,36 @@ export default class ChainsawService {
     while (true) {
       const start = Date.now()
       await this.pollOnce()
-      const elapsed = Date.now() - start
-      this.log.debug(`Spent ${elapsed} ms polling`)
+      const elapsed = start - Date.now()
+      this.log.info(`Spent ${elapsed} ms polling`)
       if (elapsed < POLL_INTERVAL) {
-        await sleep(POLL_INTERVAL - elapsed)
+        this.log.info(`IM SLEEPING NOW ${POLL_INTERVAL - elapsed}`)
+        await sleep(POLL_INTERVAL)
       }
+      this.log.info(`POLL COMPLETED, BEGIN LOGGING AGAIN`)
     }
   }
 
   public async pollOnce(): Promise<void> {
+    const timeout = setTimeout(() => {
+      console.log(`doFetchEvents() is taking too long (> 30s), restarting..`);
+      process.exit(1)
+    }, 30 * 1000);
     try {
+      this.log.info(`I AM FETCHING EVENTS NOW`)
       await this.db.withTransaction(() => this.doFetchEvents())
     } catch (e) {
       this.log.error(`Fetching events failed: ${e}`)
     }
+    this.log.info(`NAILED IT`)
+    clearTimeout(timeout);
     try {
+      this.log.info(`I AM PROCESSING EVENTS NOW`)
       await this.db.withTransaction(() => this.doProcessEvents())
     } catch (e) {
       this.log.error(`Processing events failed: ${e}`)
     }
+    this.log.info(`NAILED IT AGAIN`)
   }
 
   /**
@@ -79,7 +90,7 @@ export default class ChainsawService {
     const event = await this.chainsawDao.eventByHash(txHash)
     const prettyEvent = {}
     Object.keys(event).forEach((prop: string): void => {
-      prettyEvent[prop] = event[prop].toString()
+      if (event[prop]) prettyEvent[prop] = event[prop].toString()
     })
     this.log.info(`Processing event: ${JSON.stringify(prettyEvent, undefined, 2)}`)
 
@@ -109,33 +120,19 @@ export default class ChainsawService {
     return res ? res : 'PROCESS_EVENTS'
   }
 
-  private async doFetchEvents() {
+  public async doFetchEventsFromRange(startingBlock: number, endingBlock: number) {
     const topBlock = await this.web3.eth.getBlockNumber()
-    // @ts-ignore
-    const last = await this.chainsawDao.lastPollFor(this.contract.address, 'FETCH_EVENTS')
-    const lastBlock = last.blockNumber
-    let toBlock = topBlock - CONFIRMATION_COUNT
-    // enforce limit of polling 10k blocks at a time
-    if (toBlock - lastBlock > 10000) {
-      toBlock = lastBlock + 10000
+    
+    if (topBlock - endingBlock < CONFIRMATION_COUNT) {
+      this.log.error(`Cannot process blocks with fewer than ${CONFIRMATION_COUNT} confirmations. Current block: ${topBlock}, requested range: ${startingBlock} to ${endingBlock}`);
+      return;
     }
 
-    // need to check for >= here since we were previously not checking for a confirmation count
-    if (lastBlock >= toBlock) {
-      if (lastBlock > toBlock) {
-        this.log.info(`lastBlock: ${lastBlock} > toBlock: ${toBlock}`)
-      }
-      return
-    }
-
-    const fromBlock = lastBlock + 1
-
-    this.log.info(`Synchronizing chain data between blocks ${fromBlock} and ${toBlock}`)
-
-    // @ts-ignore
+    this.log.info(`Synchronizing chain data between blocks ${startingBlock} and ${endingBlock}`)
+    
     const events = await this.contract.getPastEvents('allEvents', {
-      fromBlock,
-      toBlock
+      fromBlock: startingBlock,
+      toBlock: endingBlock
     })
 
     const blockIndex = {} as any
@@ -168,14 +165,43 @@ export default class ChainsawService {
 
     if (channelEvents.length) {
       this.log.info(`Inserting new transactions: ${channelEvents.map((e: ContractEvent) => e.txHash)}`)
-      // @ts-ignore
-      await this.chainsawDao.recordEvents(channelEvents, toBlock, this.contract.address)
+      await this.chainsawDao.recordEvents(channelEvents, endingBlock, this.contract.address)
       this.log.debug(`Successfully inserted ${channelEvents.length} transactions.`)
     } else {
       this.log.debug('No new transactions found; nothing to do.')
-      // @ts-ignore
-      await this.chainsawDao.recordPoll(toBlock, null, this.contract.address, 'FETCH_EVENTS')
     }
+
+    // unconditionally record polling event
+    await this.chainsawDao.recordPoll(endingBlock, null, this.contract.address, 'FETCH_EVENTS')
+  }
+
+  private async doFetchEvents() {
+    this.log.info(`FETCHING EVENTS NOW`)
+    const topBlock = await this.web3.eth.getBlockNumber()
+    // @ts-ignore
+    const last = await this.chainsawDao.lastPollFor(this.contract.address, 'FETCH_EVENTS')
+    const lastBlock = last.blockNumber
+    let toBlock = topBlock - CONFIRMATION_COUNT
+    // enforce limit of polling 10k blocks at a time
+    if (toBlock - lastBlock > 10000) {
+      toBlock = lastBlock + 10000
+    }
+    this.log.info(`FETCHING EVENTS, LIMITS ENFORCED`)
+
+    // need to check for >= here since we were previously not checking for a confirmation count
+    if (lastBlock >= toBlock) {
+      if (lastBlock > toBlock) {
+        this.log.info(`lastBlock: ${lastBlock} > toBlock: ${toBlock}`)
+      }
+      return
+    }
+    this.log.info(`FETCHING EVENTS, CONFIRMATION COUNT ENFORCED`)
+
+    const fromBlock = lastBlock + 1
+
+    this.log.info(`FETCHING EVENTS, doFetchEventsFromRange(${fromBlock}, ${toBlock})`)
+
+    await this.doFetchEventsFromRange(fromBlock, toBlock);
   }
 
   private async doProcessEvents() {
@@ -208,6 +234,13 @@ export default class ChainsawService {
   }
 
   private async processDidUpdateChannel(chainsawId: number, event: DidUpdateChannelEvent, force: boolean = false): Promise<PollType> {
+    const prev = await this.channelsDao.getChannelOrInitialState(event.user)
+    if (prev.status == "CS_CHAINSAW_ERROR" && !force) {
+      // if there was a previous chainsaw error, return
+      // and do not process event
+      return 'SKIP_EVENTS'
+    }
+
     if (event.txCountGlobal > 1) {
       const knownEvent = await this.channelsDao.getChannelUpdateByTxCount(
         event.user,
@@ -222,6 +255,8 @@ export default class ChainsawService {
           `This should never happen! Event body: ${JSON.stringify(event)}`
         )
         this.log.error(msg)
+        // put channel into error state
+        await this.channelsDao.addChainsawErrorId(event.user, event.chainsawId!)
         if (this.config.isProduction)
           throw new Error(msg)
         return
@@ -233,18 +268,14 @@ export default class ChainsawService {
           `This should never happen! Event body: ${JSON.stringify(event)}`
         )
         this.log.error(msg)
+        // put channel into error state
+        await this.channelsDao.addChainsawErrorId(event.user, event.chainsawId!)
         if (this.config.isProduction)
           throw new Error(msg)
         return
       }
     }
 
-    const prev = await this.channelsDao.getChannelOrInitialState(event.user)
-    if (prev.status == "CS_CHAINSAW_ERROR" && !force) {
-      // if there was a previous chainsaw error, return
-      // and do not process event
-      return 'SKIP_EVENTS'
-    }
     try {
       const state = await this.validator.generateConfirmPending(
         connext.convert.ChannelState('str', prev.state),
@@ -296,10 +327,11 @@ export default class ChainsawService {
     let disputeRecord = await this.channelDisputesDao.getActive(event.user)
     if (!disputeRecord) {
       // dispute might not have been initiated by us, so we need to add it here
-      disputeRecord = await this.channelDisputesDao.create(event.user, 'Dispute caught by chainsaw', chainsawId, null, onchainChannel.channelClosingTime)
-    } else {
-      await this.channelDisputesDao.setExitEvent(disputeRecord.id, chainsawId, onchainChannel.channelClosingTime)
+      disputeRecord = await this.channelDisputesDao.create(event.user, 'Dispute caught by chainsaw', false, chainsawId, null, onchainChannel.channelClosingTime)
     }
+
+    // set the exit event even if the user has initiated the dispute
+    await this.channelDisputesDao.setExitEvent(disputeRecord.id, chainsawId, onchainChannel.channelClosingTime)
 
     // check if sender was user
     if (event.senderIdx == 0) {
@@ -307,7 +339,7 @@ export default class ChainsawService {
       return
     }
 
-    // TODO FIX AND REMOVE
+    // TODO: FIX AND REMOVE
     this.log.info(`event.senderIdx: ${JSON.stringify(event.senderIdx)}`)
     try {
       if ((event.senderIdx as any)._hex == "0x00") {
@@ -354,6 +386,14 @@ export default class ChainsawService {
       ).encodeABI()
     } else {
       this.log.info(`Channel has exited with the latest state, hub will empty with onchain state! event: ${prettySafeJson(event)}`)
+      // do not respond with empty channel if the closing time has not passed
+      // NOTE: it is okay to compare blocktime with regular time here, since
+      // this is called on a 2s loop
+      const currentTs = Math.floor(Date.now() / 1000)
+      if (currentTs < onchainChannel.channelClosingTime) {
+        // return without responding
+        return
+      }
       data = this.contract.methods.emptyChannel(event.user).encodeABI()
     }
     const txn = await this.onchainTransactionService.sendTransaction(this.db, {
@@ -368,7 +408,7 @@ export default class ChainsawService {
       }
     })
 
-    await this.channelDisputesDao.addStartExitOnchainTx(disputeRecord.id, txn)
+    await this.channelDisputesDao.addEmptyOnchainTx(disputeRecord.id, txn)
   }
 
   private async processDidEmptyChannel(chainsawId: number, event: DidEmptyChannelEvent) {

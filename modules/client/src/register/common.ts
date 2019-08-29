@@ -12,20 +12,3 @@ global.Promise = require('bluebird')
 if (process.env.NODE_ENV !== 'production') {
   (Promise as any).longStackTraces()
 }
-
-// Enable more verbose debug logging outside of production
-if (process.env.NODE_ENV !== 'production') {
-  require('debug').enable([
-    '*',
-    '-nodemon',
-    '-express:application',
-    '-sequelize:hooks',
-    '-express:router*',
-    '-socket.io:namespace',
-    '-nock.*',
-    '-mocha:*',
-    '-sequelize:sql:pg',
-    '-sequelize:connection:pg',
-    '-follow-redirects',
-  ].join(','))
-}

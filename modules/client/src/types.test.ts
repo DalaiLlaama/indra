@@ -1,5 +1,4 @@
 import * as eth from 'ethers'
-import Web3 from 'web3'
 
 import * as ChannelManagerAbi from './contract/ChannelManagerAbi.json'
 import { BN, isBN, toBN } from './lib'
@@ -148,8 +147,7 @@ describe('Type Utils', () => {
     const ethUrl = ''
 
     it('makeEventVerbose should work with mainnet hub', async () => {
-      const web3 = new Web3(ethUrl)
-      const provider = web3.eth
+      const provider = new eth.providers.JsonRpcProvider(ethUrl)
 
       const validator = new Validator(hubAddress, provider, ChannelManagerAbi.abi)
 

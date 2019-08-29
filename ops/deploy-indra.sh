@@ -18,7 +18,7 @@ if [[ -n "`git diff origin/staging`" ]]
 then echo "Aborting: Make sure your branch is up to date with origin/staging" && exit 1
 fi
 
-if [[ "`pwd | sed 's|.*/\(.*\)|\1|'`" != "indra" ]]
+if [[ ! "`pwd | sed 's|.*/\(.*\)|\1|'`" =~ "indra" ]]
 then echo "Aborting: Make sure you're in the indra project root" && exit 1
 fi
 
@@ -66,3 +66,8 @@ git push origin master --no-verify
 # Push a new indra release tag
 git tag indra-$indra_version
 git push origin indra-$indra_version --no-verify
+
+# Bring staging up-to-date w master
+git checkout staging
+git merge master
+git push origin staging --no-verify

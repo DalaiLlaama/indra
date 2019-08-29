@@ -1,8 +1,6 @@
 import { ethers as eth } from 'ethers'
-import { Web3Provider } from 'ethers/providers'
 import { EventEmitter } from 'events'
 import { Action, applyMiddleware, createStore } from 'redux'
-import Web3 from 'web3'
 
 import { ChannelManager, IChannelManager } from './contract/ChannelManager'
 import {
@@ -77,7 +75,6 @@ export interface IConnextChannelOptions {
   privateKey?: string
   user?: string
   externalWallet?: any,
-  web3Provider?: Web3Provider
   loadState?(): any
   safeSignHook?(state: ChannelState | ThreadState): Promise<string> // NOTE: only a placeholder
   saveState?(state: any): any
@@ -190,6 +187,10 @@ export abstract class ConnextChannel extends EventEmitter {
   // ******************************
   // **** CORE CHANNEL METHODS ****
   // ******************************
+
+  public async getState(): Promise<any> {
+    return this.internal.store.getState()
+  }
 
   public async buy(purchase: PartialPurchaseRequest): Promise<{ purchaseId: string }> {
     return this.internal.buyController.buy(purchase)
@@ -498,8 +499,8 @@ export class ConnextInternal extends ConnextChannel {
     return eth.utils.solidityKeccak256(['bytes32'], [eth.utils.randomBytes(32)])
   }
 
-  public async getContractEvents(eventName: string, fromBlock: number): Promise<any> {
-    return this.contract.getPastEvents(eventName, [this.opts.user], fromBlock)
+  public async getContractEvents(eventName: string, fromBlock: number, toBlock?: number): Promise<any> {
+    return this.contract.getPastEvents(eventName, [this.opts.user], fromBlock, toBlock || 'latest')
   }
 
   public async signChannelState(state: UnsignedChannelState): Promise<ChannelState> {

@@ -7,6 +7,7 @@ import { default as Config } from '../Config'
 import PaymentHub from '../PaymentHub'
 import { Logger } from '../util'
 
+debugger;
 const config = Config.fromEnv()
 const log = new Logger('Main', config.logLevel)
 const hub = new PaymentHub(config)
@@ -23,6 +24,7 @@ async function run(): Promise<void> {
     'fix-channels': (args: string[]): Promise<void> => hub.fixBrokenChannels(),
     'hub': (args: string[]): Promise<any> => hub.start(),
     'process-tx': (args: string[]): Promise<void> => hub.processTx(args[0]),
+    'process-blocks': (args: string[]): Promise<void> => hub.fetchEventsFromBlock(+args[0], +args[1])
   }
 
   const cmd = process.argv[2] || 'hub'

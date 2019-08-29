@@ -120,14 +120,14 @@ describe('WithdrawalController', () => {
         name: 'should fail if user tries to sell more tokens than they have',
       },
       {
-        args: { withdrawalTokenUser: '5' },
-        failsWith: /User token withdrawals are not permitted at this time./,
-        name: 'should fail if user tries to withdraw tokens',
+        args: { withdrawalTokenUser: '100' },
+        failsWith: /Cannot withdraw more tokens than exist in your channel./,
+        name: 'should fail if user tries to withdraw more tokens than they have',
       },
       {
-        args: { weiToSell: '5' },
-        failsWith: /User exchanging wei at withdrawal is not permitted at this time./,
-        name: 'should fail if user tries to exchange wei',
+        args: { weiToSell: '100' },
+        failsWith: /Cannot sell more wei than exist in your channel./,
+        name: 'should fail if user tries to exchange more wei than they have',
       },
     ], async ({ name, args, failsWith }: any): Promise<any> => {
       await connext.start()

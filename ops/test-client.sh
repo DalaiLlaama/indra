@@ -45,7 +45,7 @@ watch_command='
 '
 
 project="`cat package.json | grep '"name":' | awk -F '"' '{print $4}'`"
-root=`pwd | sed 's/indra.*/indra/'`
+cwd=`pwd`
 if [[ "$1" == "--watch" ]]
 then
   suffix="client_watcher"
@@ -91,7 +91,7 @@ docker run \
   --name="$ETHPROVIDER_HOST" \
   --network="$NETWORK" \
   --rm \
-  --volume="$root/modules/contracts:/root" \
+  --volume="$cwd/modules/contracts:/root" \
   --tmpfs="/data" \
   ${project}_builder ops/entry.sh signal nomigrate
 
@@ -107,7 +107,7 @@ docker run \
   --network="$NETWORK" \
   --rm \
   --tty \
-  --volume=$root/modules/client:/root \
+  --volume=$cwd/modules/client:/root \
   ${project}_builder -c '
     PATH=./node_modules/.bin:$PATH
     echo "Client Tester Container launched!";echo
